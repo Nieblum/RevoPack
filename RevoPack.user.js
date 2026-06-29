@@ -1,0 +1,2736 @@
+// ==UserScript==
+// @name         RevoPack
+// @version      1.4
+// @author       Nieblum
+// @description  Paczka: Auto Zestaw, Auto Szybka Walka, Anty Duch, Zestaw Po Walce, Auto Dodawanie do Grupy, Lista Graczy, Auto Przywołanie, Auto Kopalnia. Główne GUI do włączania/ukrywania.
+// @match        https://*.margonem.pl/
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const PACK = {
+        ADDONY: [
+            { id: 'zestaw',      nazwa: 'Auto Zestaw (PvP)',       widgetEl: 'aze_widget',      onCb: 'aze_on',      ikona: '⚔️', brakOkna: false },
+            { id: 'szybka',      nazwa: 'Auto Szybka Walka',       widgetEl: 'aszw_widget',     onCb: 'aszw_on',     ikona: '⚡', brakOkna: false },
+            { id: 'antyduch',    nazwa: 'Anty Duch (anty-AFK)',    widgetEl: 'antyduch_widget', onCb: 'antyduch_on', ikona: '👻', brakOkna: false },
+            { id: 'powalce',     nazwa: 'Zestaw Po Walce',         widgetEl: 'zpw_widget',      onCb: 'zpw_on',      ikona: '🔄', brakOkna: false },
+            { id: 'grupa',       nazwa: 'Auto Dodawanie do Grupy', widgetEl: 'adg_widget',      onCb: 'adg_on',      ikona: '➕', brakOkna: false },
+            { id: 'lista',       nazwa: 'Lista Graczy',            widgetEl: 'lg_widget',       onCb: 'lg_on',       ikona: '👥', brakOkna: false },
+            { id: 'przywolanie', nazwa: 'Auto Przywołanie',        widgetEl: null,              onCb: 'aprz_on',     ikona: '📨', brakOkna: true  },
+            { id: 'kopalnia',    nazwa: 'Auto Kopalnia',           widgetEl: 'akop_widget',     onCb: 'akop_on',     ikona: '⛏️', brakOkna: false },
+        ],
+
+        stan: null,
+
+        loadStan() {
+            let zapis = {};
+            try { const s = localStorage.getItem('mpack_stan'); if (s) zapis = JSON.parse(s); } catch (e) {}
+            const stan = {};
+            for (const a of PACK.ADDONY) {
+                const z = zapis[a.id] || {};
+                stan[a.id] = {
+                    enabled:  z.enabled  !== undefined ? z.enabled  : false,
+                    widoczny: z.widoczny !== undefined ? z.widoczny : false,
+                };
+            }
+            PACK.stan = stan;
+        },
+        saveStan() { try { localStorage.setItem('mpack_stan', JSON.stringify(PACK.stan)); } catch (e) {} },
+        isEnabled(id) { return PACK.stan[id] && PACK.stan[id].enabled; },
+        ustawEnabled(id, val) {
+            PACK.stan[id].enabled = val;
+            const def = PACK.ADDONY.find(a => a.id === id);
+            const cb = document.getElementById(def.onCb);
+            if (cb) { cb.checked = val; cb.dispatchEvent(new Event('change')); }
+            PACK.saveStan();
+        },
+        ustawWidocznosc(id, val) {
+            PACK.stan[id].widoczny = val;
+            const def = PACK.ADDONY.find(a => a.id === id);
+            if (def.brakOkna || !def.widgetEl) return;
+            const el = document.getElementById(def.widgetEl);
+            if (el) el.style.display = val ? '' : 'none';
+            PACK.saveStan();
+        },
+        zastosujStan() {
+            for (const a of PACK.ADDONY) {
+                const cb = document.getElementById(a.onCb);
+                if (cb) cb.checked = PACK.stan[a.id].enabled;
+                if (!a.brakOkna && a.widgetEl) {
+                    const el = document.getElementById(a.widgetEl);
+                    if (el) el.style.display = PACK.stan[a.id].widoczny ? '' : 'none';
+                }
+            }
+        },
+    };
+
+    function stworzGlowneGui() {
+        if (document.getElementById('mpack_gui')) return;
+        let zwiniety = false;
+        try { if (localStorage.getItem('mpack_gui_zwiniety') === '1') zwiniety = true; } catch (e) {}
+
+        const gui = document.createElement('div');
+        gui.id = 'mpack_gui';
+        let rows = '';
+        for (const a of PACK.ADDONY) {
+            const eyeBtn = a.brakOkna
+                ? `<span class="mpack_noeye" title="Ten dodatek nie ma okna">—</span>`
+                : `<button class="mpack_eye" data-id="${a.id}" title="Pokaż/ukryj okno">${PACK.stan[a.id].widoczny ? '👁' : '🚫'}</button>`;
+            rows += `
+            <div class="mpack_row" data-id="${a.id}">
+                <label class="mpack_switch" title="Włącz/wyłącz dodatek">
+                    <input type="checkbox" class="mpack_enable" data-id="${a.id}" ${PACK.stan[a.id].enabled ? 'checked' : ''}>
+                    <span class="mpack_slider"></span>
+                </label>
+                <span class="mpack_name">${a.ikona} ${a.nazwa}</span>
+                ${eyeBtn}
+            </div>`;
+        }
+        gui.innerHTML = `
+        <div id="mpack_header">
+            <span id="mpack_title">🎮 RevoPack</span>
+            <button id="mpack_collapse">${zwiniety ? '▲' : '▼'}</button>
+        </div>
+        <div id="mpack_body" style="display:${zwiniety ? 'none' : 'block'}">
+            <div id="mpack_hint">⚙ przełącznik = włącz/wyłącz · 👁 = pokaż okno</div>
+            ${rows}
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #mpack_gui {
+            position: fixed; top: 60px; left: 12px;
+            background: linear-gradient(180deg, rgba(20,12,40,.97), rgba(10,8,25,.97));
+            border: 1px solid #b388ff99; border-radius: 12px;
+            padding: 9px 11px; font-size: 12px; color: #e8ddff;
+            z-index: 100000; width: 235px; user-select: none;
+            font-family: sans-serif; box-shadow: 0 4px 20px rgba(0,0,0,.5);
+        }
+        #mpack_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 14px; color: #c8a4ff;
+            cursor: move; margin-bottom: 4px;
+        }
+        #mpack_collapse {
+            background: none; border: 1px solid #b388ff66; color: #c8a4ff;
+            border-radius: 5px; cursor: pointer; padding: 1px 7px; font-size: 11px;
+        }
+        #mpack_hint { font-size: 10px; color: #9988bb; margin-bottom: 6px; text-align: center; line-height: 1.4; }
+        .mpack_row { display: flex; align-items: center; gap: 8px; padding: 3px 2px; border-radius: 6px; }
+        .mpack_row:hover { background: rgba(255,255,255,.05); }
+        .mpack_name { flex: 1; font-size: 12px; }
+        .mpack_switch { position: relative; display: inline-block; width: 32px; height: 17px; flex-shrink: 0; cursor: pointer; }
+        .mpack_switch input { opacity: 0; width: 0; height: 0; }
+        .mpack_slider { position: absolute; inset: 0; background: #443355; border-radius: 17px; transition: .2s; }
+        .mpack_slider:before { content: ""; position: absolute; height: 13px; width: 13px; left: 2px; bottom: 2px; background: #ccc; border-radius: 50%; transition: .2s; }
+        .mpack_switch input:checked + .mpack_slider { background: #8844ee; }
+        .mpack_switch input:checked + .mpack_slider:before { transform: translateX(15px); background: #fff; }
+        .mpack_eye { background: rgba(180,130,255,.12); border: 1px solid #b388ff44; border-radius: 5px; cursor: pointer; padding: 2px 6px; font-size: 13px; flex-shrink: 0; }
+        .mpack_eye:hover { background: rgba(180,130,255,.3); }
+        .mpack_noeye { color: #665577; font-size: 13px; flex-shrink: 0; padding: 2px 8px; }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(gui);
+
+        gui.querySelectorAll('.mpack_enable').forEach(cb => {
+            cb.addEventListener('change', () => { PACK.ustawEnabled(cb.dataset.id, cb.checked); });
+        });
+        gui.querySelectorAll('.mpack_eye').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                const nowy = !PACK.stan[id].widoczny;
+                PACK.ustawWidocznosc(id, nowy);
+                btn.textContent = nowy ? '👁' : '🚫';
+            });
+        });
+        document.getElementById('mpack_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            zwiniety = !zwiniety;
+            document.getElementById('mpack_body').style.display = zwiniety ? 'none' : 'block';
+            document.getElementById('mpack_collapse').textContent = zwiniety ? '▲' : '▼';
+            try { localStorage.setItem('mpack_gui_zwiniety', zwiniety ? '1' : '0'); } catch (e) {}
+        });
+        const header = document.getElementById('mpack_header');
+        let drag = false, ox = 0, oy = 0;
+        header.addEventListener('mousedown', e => {
+            if (e.target.tagName === 'BUTTON') return;
+            drag = true; ox = e.clientX - gui.offsetLeft; oy = e.clientY - gui.offsetTop;
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            gui.style.left = (e.clientX - ox) + 'px';
+            gui.style.top  = (e.clientY - oy) + 'px';
+        });
+        document.addEventListener('mouseup', () => drag = false);
+    }
+
+
+
+    // ====================== MODUŁ: zestaw ======================
+    function initModul_zestaw() {
+        const addon = () => {
+
+    // Domyślna konfiguracja (zapisywana w localStorage)
+    const DOMYSLNE = {
+        zestawy: { w:1, p:1, b:2, h:2, t:2, m:3, default:1 },
+        maxKratki: 12,
+        intervalMs: 1600,
+        cooldownMs: 1100,
+        pauzaPoKlikuMs: 900,
+        ignorujPrzyjaciol: true,
+        ignorujKlanowiczow: true,
+        ignorujSojusznikow: true,
+        pokazPowiadomienia: true,
+        widgetPos: { x: 12, y: null, bottom: 12 },
+        zwiniety: false,
+    };
+
+    const PROF_NAZWY = {
+        w: 'Wojownik',
+        p: 'Paladyn',
+        b: 'Tancerz Ostrzy',
+        h: 'Łowca',
+        t: 'Tropiciel',
+        m: 'Mag',
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('aze_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+
+    const saveConfig = () => {
+        localStorage.setItem('aze_config', JSON.stringify(CONFIG));
+    };
+
+    const CONFIG = loadConfig();
+
+    const isNI = typeof Engine === 'object';
+    let ostatniZestaw = -1;
+    let ostatniaZmiana = 0;
+    let ostatniKlikMapy = 0;
+
+    // Po kliknięciu w grę (mapa/postać/przejście) wstrzymaj zmianę zestawu,
+    // żeby żądanie zestawu nie "zjadło" kliknięcia przejścia (powodowało przeładowania).
+    document.addEventListener('mousedown', (e) => {
+        if (e.target && e.target.closest && e.target.closest('#aze_widget')) return;
+        ostatniKlikMapy = Date.now();
+    }, true);
+
+    const pauzaPoKliku = () => (Date.now() - ostatniKlikMapy) < CONFIG.pauzaPoKlikuMs;
+
+    // Czy jesteś w grupie? (solo = 0 elementów .party-member, grupa = 2+)
+    // Dodatek domyślnie pauzuje w grupie - nie zmienia zestawu pod nikogo.
+    const wGrupie = () => document.querySelectorAll('.party-member').length > 0;
+
+    const getHero   = () => isNI ? Engine.hero.d : window.hero;
+    const getMapPvp = () => isNI ? Engine.map.d.pvp : window.map.pvp;
+
+    const getOthers = () => {
+        if (isNI) {
+            return Engine.others.getDrawableList()
+                .filter(o => o.d && o.d.nick && o.d.x !== undefined)  // tylko realni gracze
+                .map(o => o.d);
+        }
+        return Object.values(window.g.other || {}).filter(o => o && o.nick);
+    };
+
+    const dystans = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+    // Relacje w NI Classic (ostatecznie zweryfikowane na żywych danych):
+    //   2 = klanowicz + przyjaciel
+    //   3 = przyjaciel (spoza klanu)
+    //   4 = klanowicz (sam, bez przyjaźni)
+    //   5 = sojusznik klanowy
+    //   1, 6 = obcy gracz (WRÓG)
+    // Klanowicza najpewniej rozpoznać po wspólnym clan.id (twarde dane).
+    // Wrogiem jest każdy kto NIE jest klanem/przyjacielem/sojusznikiem.
+    const czyWrog = (o, heroId, heroClanId) => {
+        const rel = o.relation;
+        const oClanId = (o.clan && o.clan.id) || 0;
+
+        // Pomiń samego siebie (po id)
+        if (heroId && o.id && String(o.id) === String(heroId)) return false;
+
+        // Klanowicz po clan.id (najpewniejszy wskaźnik)
+        if (CONFIG.ignorujKlanowiczow && heroClanId > 0 && oClanId === heroClanId) return false;
+
+        // Klanowicz po relacji (2 lub 4)
+        if (CONFIG.ignorujKlanowiczow && (rel === 2 || rel === 4)) return false;
+
+        // Przyjaciel po relacji (2 lub 3)
+        if (CONFIG.ignorujPrzyjaciol && (rel === 2 || rel === 3)) return false;
+
+        // Sojusznik klanowy (5)
+        if (CONFIG.ignorujSojusznikow && rel === 5) return false;
+
+        return true;
+    };
+
+    // Odczyt aktualnie aktywnego zestawu z interfejsu gry (1-9) lub null
+    const aktualnyZestaw = () => {
+        try {
+            const el = Array.from(document.querySelectorAll('.builds-interface'))
+                .filter(e => !e.closest('#aze_widget'))
+                .find(e => e.offsetParent !== null);
+            if (!el) return null;
+            const txt = (el.querySelector('.choose-build.build-index') || el).textContent || '';
+            const no = parseInt(txt.trim(), 10);
+            return Number.isFinite(no) ? no : null;
+        } catch (e) { return null; }
+    };
+
+    let oczekiwanyZestaw = null;
+    let probaZmianyCzas = 0;
+
+    const zmienZestaw = (nr) => {
+        if (nr < 1 || nr > 9) return;
+
+        // Cooldown ochronny
+        const teraz = Date.now();
+        if (teraz - ostatniaZmiana < CONFIG.cooldownMs) return;
+
+        // Czy już mamy ten zestaw aktywny? Jeśli tak - nie wysyłaj nic.
+        const aktualny = aktualnyZestaw();
+        if (aktualny === nr) { ostatniZestaw = nr; oczekiwanyZestaw = null; return; }
+
+        // Zmiana przez _g (sprawdzona droga - NIE send2, które przeładowywało grę)
+        if (typeof _g !== 'function') return;
+
+        ostatniaZmiana = teraz;
+        ostatniZestaw = nr;
+        oczekiwanyZestaw = nr;
+        probaZmianyCzas = teraz;
+
+        _g('builds&action=updateCurrent&id=' + encodeURIComponent(String(nr)));
+
+        // Potwierdzenie po 700ms - jeśli się nie udało, pozwól spróbować ponownie
+        setTimeout(() => {
+            if (oczekiwanyZestaw !== nr) return; // już inny cel
+            const po = aktualnyZestaw();
+            if (po === nr) {
+                oczekiwanyZestaw = null; // potwierdzone
+            } else {
+                // nie potwierdzono - zresetuj by następny tick mógł ponowić
+                ostatniZestaw = -1;
+                oczekiwanyZestaw = null;
+            }
+        }, 700);
+    };
+
+    const pokazToast = (txt) => {
+        if (!CONFIG.pokazPowiadomienia) return;
+        let el = document.getElementById('aze_toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'aze_toast';
+            Object.assign(el.style, {
+                position: 'fixed', bottom: '80px', left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,.9)', color: '#ffe066',
+                padding: '7px 18px', borderRadius: '8px', fontSize: '13px',
+                zIndex: '99999', border: '1px solid #ffe06655',
+                pointerEvents: 'none', transition: 'opacity .35s',
+                fontFamily: 'sans-serif',
+            });
+            document.body.appendChild(el);
+        }
+        el.textContent = txt;
+        el.style.opacity = '1';
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.style.opacity = '0', 2800);
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('aze_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'aze_widget';
+
+        // Buduj wiersze profesji
+        let profRows = '';
+        for (const [key, nazwa] of Object.entries(PROF_NAZWY)) {
+            profRows += `
+            <div class="aze_prof_row">
+                <span class="aze_prof_name">${nazwa}</span>
+                <input class="aze_prof_input" type="number" min="1" max="9"
+                    data-prof="${key}" value="${CONFIG.zestawy[key] || 1}">
+            </div>`;
+        }
+
+        w.innerHTML = `
+        <div id="aze_header">
+            <span id="aze_title">⚔️ Auto Zestaw</span>
+            <div id="aze_header_btns">
+                <label class="aze_toggle"><input type="checkbox" id="aze_on" ${CONFIG.enabled !== false ? 'checked' : ''}> ON</label>
+                <button id="aze_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="aze_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="aze_status_map">🗺️ Czekam...</div>
+            <div id="aze_status_enemy">👤 —</div>
+            <div id="aze_status_set">🎒 Aktywny zestaw: —</div>
+            <div id="aze_separator"></div>
+            <div id="aze_prof_table">
+                <div class="aze_prof_header">
+                    <span>Profesja</span><span>Zestaw</span>
+                </div>
+                ${profRows}
+                <div class="aze_prof_row">
+                    <span class="aze_prof_name" style="color:#aaa">Domyślny</span>
+                    <input class="aze_prof_input" type="number" min="1" max="9"
+                        data-prof="default" value="${CONFIG.zestawy.default || 1}">
+                </div>
+            </div>
+            <div id="aze_range_row">
+                <span>Zasięg:</span>
+                <input id="aze_range" type="number" min="1" max="30" value="${CONFIG.maxKratki}">
+                <span>kr</span>
+            </div>
+        </div>`;
+
+        // Style
+        const style = document.createElement('style');
+        style.textContent = `
+        #aze_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #ffe06688;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #ffe066;
+            z-index: 99999;
+            width: 210px;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.6;
+            cursor: move;
+        }
+        #aze_header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        #aze_header_btns {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #aze_collapse {
+            background: none;
+            border: 1px solid #ffe06666;
+            color: #ffe066;
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 0 5px;
+            font-size: 10px;
+            line-height: 16px;
+        }
+        .aze_toggle {
+            font-weight: normal;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        #aze_separator {
+            border-top: 1px solid #ffe06633;
+            margin: 5px 0;
+        }
+        #aze_status_map, #aze_status_enemy, #aze_status_set {
+            font-size: 11px;
+        }
+        .aze_prof_header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #aaa;
+            margin-bottom: 2px;
+            padding: 0 2px;
+        }
+        .aze_prof_row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 2px 0;
+        }
+        .aze_prof_name {
+            font-size: 11px;
+            color: #ffdd88;
+        }
+        .aze_prof_input {
+            width: 38px;
+            background: rgba(255,220,100,.12);
+            border: 1px solid #ffe06655;
+            border-radius: 4px;
+            color: #ffe066;
+            text-align: center;
+            font-size: 12px;
+            padding: 1px 3px;
+        }
+        #aze_range_row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 5px;
+            font-size: 11px;
+            color: #aaa;
+        }
+        #aze_range {
+            width: 38px;
+            background: rgba(255,220,100,.12);
+            border: 1px solid #ffe06655;
+            border-radius: 4px;
+            color: #ffe066;
+            text-align: center;
+            font-size: 12px;
+            padding: 1px 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        // Pozycja
+        w.style.left   = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) {
+            w.style.top    = CONFIG.widgetPos.y + 'px';
+        } else {
+            w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+        }
+
+        // Zdarzenia inputów profesji
+        w.querySelectorAll('.aze_prof_input').forEach(input => {
+            input.addEventListener('change', () => {
+                const prof = input.dataset.prof;
+                const val  = Math.max(1, Math.min(9, parseInt(input.value) || 1));
+                input.value = val;
+                CONFIG.zestawy[prof] = val;
+                saveConfig();
+            });
+            // Blokuj propagację kliknięć (żeby nie triggerowały drag)
+            input.addEventListener('mousedown', e => e.stopPropagation());
+        });
+
+        // Zasięg
+        const rangeInput = document.getElementById('aze_range');
+        rangeInput.addEventListener('change', () => {
+            CONFIG.maxKratki = Math.max(1, Math.min(30, parseInt(rangeInput.value) || 12));
+            rangeInput.value = CONFIG.maxKratki;
+            saveConfig();
+        });
+        rangeInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        // ON/OFF
+        const cbOn = document.getElementById('aze_on');
+        cbOn.addEventListener('change', () => {
+            CONFIG.enabled = cbOn.checked;
+            saveConfig();
+        });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // Zwijanie
+        document.getElementById('aze_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('aze_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('aze_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // Drag
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 12));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left   = (e.clientX - ox) + 'px';
+            w.style.top    = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            CONFIG.widgetPos.bottom = 12;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (pvp, wrog, zestaw) => {
+        const mapEl  = document.getElementById('aze_status_map');
+        const wrogEl = document.getElementById('aze_status_enemy');
+        const setEl  = document.getElementById('aze_status_set');
+        if (!mapEl || !wrogEl || !setEl) return;
+
+        if (!pvp) {
+            if (zestaw === '👥 grupa') {
+                mapEl.style.color = '#88aaff'; mapEl.textContent = '👥 Jesteś w grupie – pauza';
+            } else {
+                mapEl.style.color = '#888'; mapEl.textContent = '🗺️ Nie-PvP – nieaktywny';
+            }
+            wrogEl.style.color = '#888'; wrogEl.textContent = '👤 —';
+            setEl.textContent = '🎒 Aktywny zestaw: —';
+            return;
+        }
+        mapEl.style.color = '#ff4444'; mapEl.textContent = '🗺️ Czerwona mapa – aktywny';
+        if (wrog) {
+            const h = getHero();
+            const profKey = (wrog.prof || '').toLowerCase();
+            const profNazwa = PROF_NAZWY[profKey] || wrog.prof || '?';
+            const d = h ? dystans(h, wrog) : '?';
+            const clanNazwa = (wrog.clan && wrog.clan.name) ? wrog.clan.name : (wrog.clanname || '');
+            const clan = clanNazwa ? ` [${clanNazwa}]` : '';
+            wrogEl.style.color = '#ff7755';
+            wrogEl.textContent = `👤 ${wrog.nick || '???'}${clan} (${profNazwa}) ${d}kr`;
+        } else {
+            wrogEl.style.color = '#888'; wrogEl.textContent = '👤 Brak wrogów w zasięgu';
+        }
+        setEl.textContent = `🎒 Aktywny zestaw: ${zestaw}`;
+    };
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('aze_on');
+        if (cbOn && !cbOn.checked) { updateStatus(false, null, '—'); return; }
+
+        // Domyślna pauza w grupie - gdy jesteś w grupie dodatek nic nie zmienia
+        if (wGrupie()) { updateStatus(false, null, '👥 grupa'); return; }
+
+        // Pauza tuż po kliknięciu w mapę/przejście - nie wysyłaj zmiany zestawu
+        if (pauzaPoKliku()) return;
+
+        const pvp = getMapPvp();
+        if (pvp !== 2) {
+            if (aktualnyZestaw() !== CONFIG.zestawy['default']) zmienZestaw(CONFIG.zestawy['default']);
+            updateStatus(false, null, '—');
+            return;
+        }
+
+        const hero   = getHero();
+        const heroId = hero.id;
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+        const others = getOthers();
+        let najblizszy = null, minD = Infinity;
+
+        for (const o of others) {
+            if (!o || o.x === undefined) continue;
+            if (!czyWrog(o, heroId, heroClanId)) continue;
+            const d = dystans(hero, o);
+            if (d <= CONFIG.maxKratki && d < minD) { minD = d; najblizszy = o; }
+        }
+
+        const profKey  = najblizszy ? (najblizszy.prof || '').toLowerCase() : null;
+        const docelowy = profKey
+            ? (CONFIG.zestawy[profKey] ?? CONFIG.zestawy['default'])
+            : CONFIG.zestawy['default'];
+
+        updateStatus(true, najblizszy, docelowy);
+
+        // zmienZestaw samo sprawdza aktualny zestaw, cooldown i potwierdza zmianę
+        const aktualny = aktualnyZestaw();
+        if (docelowy !== aktualny) {
+            zmienZestaw(docelowy);
+            if (najblizszy) {
+                const profNazwa = PROF_NAZWY[profKey] || profKey || '?';
+                pokazToast(`⚔️ ${najblizszy.nick || '???'} [${profNazwa}] → Zestaw ${docelowy}`);
+            } else {
+                pokazToast(`🛡️ Brak wrogów → Zestaw ${docelowy}`);
+            }
+        }
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: szybka ======================
+    function initModul_szybka() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        maxWrogow: 5,        // klikaj F tylko gdy wrogów <= tyle
+        liczTylkoGraczy: true, // czy liczyć tylko graczy (pomijać NPC/przywołania)
+        intervalMs: 500,
+        widgetPos: { x: 12, y: null, bottom: 70 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('aszw_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('aszw_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    let ostatniaWalka = null; // id walki w której już kliknęliśmy F
+    let probowanoWTejWalce = false; // czy już próbowaliśmy F w tej walce
+
+    // ── Logika walki ─────────────────────────────────────────────
+
+    const wWalce = () => {
+        return Engine.battle
+            && Engine.battle.isBattleShow
+            && Engine.battle.isBattleShow()
+            && !Engine.battle.endBattle;
+    };
+
+    const policzWrogow = () => {
+        const lista = Engine.battle.warriorsList;
+        if (!lista) return 0;
+        const myteam = Engine.battle.myteam;
+        let wrogowie = 0;
+        for (const id in lista) {
+            const w = lista[id];
+            if (!w) continue;
+            if (w.team === myteam) continue;          // sojusznik
+            if (CONFIG.liczTylkoGraczy && w.npc) continue; // pomiń NPC/przywołania
+            // pomiń martwych
+            if (w.getHpp && w.getHpp() <= 0) continue;
+            if (w.hasZeroHpp && w.hasZeroHpp()) continue;
+            wrogowie++;
+        }
+        return wrogowie;
+    };
+
+    const klikajF = () => {
+        if (!Engine.battle.canAutoFight || !Engine.battle.canAutoFight()) return;
+        if (Engine.battle.isAutoFightActive && Engine.battle.isAutoFightActive()) return;
+        // autoFight przyjmuje event/arg — wywołujemy jak natywny przycisk
+        Engine.battle.autoFight(true);
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('aszw_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'aszw_widget';
+        w.innerHTML = `
+        <div id="aszw_header">
+            <span id="aszw_title">⚡ Auto Szybka Walka</span>
+            <div id="aszw_hbtns">
+                <label class="aszw_toggle"><input type="checkbox" id="aszw_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="aszw_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="aszw_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="aszw_status">⚪ Poza walką</div>
+            <div id="aszw_separator"></div>
+            <div class="aszw_row">
+                <span>Max wrogów do auto-F:</span>
+                <input id="aszw_max" type="number" min="1" max="50" value="${CONFIG.maxWrogow}">
+            </div>
+            <label class="aszw_checkrow">
+                <input type="checkbox" id="aszw_onlyplayers" ${CONFIG.liczTylkoGraczy ? 'checked' : ''}>
+                <span>Licz tylko graczy (pomiń NPC)</span>
+            </label>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #aszw_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #66ccff88;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #aee9ff;
+            z-index: 99999;
+            width: 215px;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.6;
+            cursor: move;
+        }
+        #aszw_header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 4px;
+            color: #66ccff;
+        }
+        #aszw_hbtns { display: flex; align-items: center; gap: 5px; }
+        #aszw_collapse {
+            background: none; border: 1px solid #66ccff66;
+            color: #66ccff; border-radius: 4px; cursor: pointer;
+            padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .aszw_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #aszw_separator { border-top: 1px solid #66ccff33; margin: 5px 0; }
+        #aszw_status { font-size: 11px; }
+        .aszw_row {
+            display: flex; justify-content: space-between;
+            align-items: center; margin: 4px 0; font-size: 11px;
+        }
+        .aszw_row input {
+            width: 45px; background: rgba(100,200,255,.12);
+            border: 1px solid #66ccff55; border-radius: 4px;
+            color: #aee9ff; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        .aszw_checkrow {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 11px; cursor: pointer; margin-top: 4px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        // ON/OFF
+        const cbOn = document.getElementById('aszw_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // max wrogów
+        const maxInput = document.getElementById('aszw_max');
+        maxInput.addEventListener('change', () => {
+            CONFIG.maxWrogow = Math.max(1, Math.min(50, parseInt(maxInput.value) || 5));
+            maxInput.value = CONFIG.maxWrogow;
+            saveConfig();
+        });
+        maxInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        // tylko gracze
+        const onlyP = document.getElementById('aszw_onlyplayers');
+        onlyP.addEventListener('change', () => { CONFIG.liczTylkoGraczy = onlyP.checked; saveConfig(); });
+        onlyP.addEventListener('mousedown', e => e.stopPropagation());
+
+        // collapse
+        document.getElementById('aszw_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('aszw_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('aszw_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // drag
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 70));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('aszw_status');
+        if (!el) return;
+        el.textContent = txt;
+        el.style.color = kolor || '#aee9ff';
+    };
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('aszw_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
+
+        if (!wWalce()) {
+            updateStatus('⚪ Poza walką', '#888');
+            ostatniaWalka = null;
+            probowanoWTejWalce = false;
+            return;
+        }
+
+        // Identyfikator walki - podpis z id wojowników (żeby rozróżnić walki)
+        const podpisWalki = Object.keys(Engine.battle.warriorsList || {}).sort().join(',');
+        // Nowa walka? Zresetuj flagę
+        if (podpisWalki !== ostatniaWalka) {
+            ostatniaWalka = podpisWalki;
+            probowanoWTejWalce = false;
+        }
+
+        const wrogowie = policzWrogow();
+        const aktywny = Engine.battle.isAutoFightActive && Engine.battle.isAutoFightActive();
+
+        if (aktywny) {
+            updateStatus(`🟢 Szybka walka aktywna (wrogów: ${wrogowie})`, '#66ff99');
+            return;
+        }
+
+        // Już próbowaliśmy w tej walce? Oddaj kontrolę graczowi.
+        if (probowanoWTejWalce) {
+            updateStatus(`✋ Tryb ręczny (możesz zmieniać F)`, '#aee9ff');
+            return;
+        }
+
+        // Pierwsze podejście w tej walce - wciśnij F jeśli wrogów w limicie
+        if (wrogowie <= CONFIG.maxWrogow && wrogowie > 0) {
+            updateStatus(`⚡ Klikam F raz (wrogów: ${wrogowie} ≤ ${CONFIG.maxWrogow})`, '#ffe066');
+            klikajF();
+            probowanoWTejWalce = true;
+        } else if (wrogowie > CONFIG.maxWrogow) {
+            updateStatus(`🔴 Za dużo wrogów (${wrogowie} > ${CONFIG.maxWrogow})`, '#ff7755');
+            probowanoWTejWalce = true; // też oznacz - nie spamuj
+        } else {
+            updateStatus(`🔍 Liczę wrogów...`, '#aee9ff');
+        }
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: antyduch ======================
+    function initModul_antyduch() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        minMinuty: 5,        // minimalny odstęp między ruchami (minuty)
+        maxMinuty: 7,        // maksymalny odstęp między ruchami (minuty)
+        widgetPos: { x: 12, y: null, bottom: 130 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('antyduch_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('antyduch_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    let nastepnyRuch = 0;   // timestamp (ms) następnego ruchu
+    let timerInterval = null;
+
+    // ── Pomocnicze ───────────────────────────────────────────────
+
+    const getHero = () => Engine.hero.d;
+
+    const wWalce = () => {
+        return Engine.battle
+            && Engine.battle.isBattleShow
+            && Engine.battle.isBattleShow()
+            && !Engine.battle.endBattle;
+    };
+
+    // Sprawdza kolizję na danym polu (czy można tam wejść)
+    const wolnePole = (x, y) => {
+        try {
+            // Engine.map.col.check zwraca 0 gdy pole jest przejściowe
+            if (Engine.map && Engine.map.col && Engine.map.col.check) {
+                return Engine.map.col.check(x, y) === 0;
+            }
+        } catch(e) {}
+        return false;
+    };
+
+    // Wykonuje ruch o jedną kratkę w losowym wolnym kierunku
+    // Używa nextStep (ruch jak WASD) zamiast autoGoTo (klik = czerwony marker)
+    const zrobRuch = () => {
+        const hero = getHero();
+        if (!hero) return false;
+
+        // Ruszamy się tylko gdy postać stoi (nie jest w trakcie ruchu)
+        if (Engine.hero.rx !== hero.x || Engine.hero.ry !== hero.y) return false;
+        if (Engine.lock && Engine.lock.check && Engine.lock.check()) return false;
+
+        const kierunki = [
+            { x: hero.x + 1, y: hero.y },
+            { x: hero.x - 1, y: hero.y },
+            { x: hero.x, y: hero.y + 1 },
+            { x: hero.x, y: hero.y - 1 },
+        ];
+
+        // Filtruj tylko wolne pola
+        const wolne = kierunki.filter(p => wolnePole(p.x, p.y));
+        if (wolne.length === 0) return false;
+
+        // Losowy wolny kierunek
+        const cel = wolne[Math.floor(Math.random() * wolne.length)];
+
+        try {
+            // nextStep ustawia krok i dodaje go do stepsToSend -> ruch bez markera
+            Engine.hero.nextStep(cel.x, cel.y);
+            return true;
+        } catch(e) {
+            console.error('[AntyDuch] Błąd ruchu:', e);
+            return false;
+        }
+    };
+
+    const losowyOdstep = () => {
+        const min = CONFIG.minMinuty * 60 * 1000;
+        const max = CONFIG.maxMinuty * 60 * 1000;
+        return min + Math.random() * (max - min);
+    };
+
+    const zaplanujRuch = () => {
+        nastepnyRuch = Date.now() + losowyOdstep();
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('antyduch_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'antyduch_widget';
+        w.innerHTML = `
+        <div id="antyduch_header">
+            <span id="antyduch_title">👻 Anty Duch</span>
+            <div id="antyduch_hbtns">
+                <label class="antyduch_toggle"><input type="checkbox" id="antyduch_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="antyduch_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="antyduch_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="antyduch_status">⚪ Czekam...</div>
+            <div id="antyduch_separator"></div>
+            <div class="antyduch_row">
+                <span>Odstęp ruchów (min):</span>
+            </div>
+            <div class="antyduch_row">
+                <span>od</span>
+                <input id="antyduch_min" type="number" min="1" max="60" value="${CONFIG.minMinuty}">
+                <span>do</span>
+                <input id="antyduch_max" type="number" min="1" max="60" value="${CONFIG.maxMinuty}">
+            </div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #antyduch_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #cc99ff88;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #e0ccff;
+            z-index: 99999;
+            width: 200px;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.6;
+            cursor: move;
+        }
+        #antyduch_header {
+            display: flex; justify-content: space-between;
+            align-items: center; font-weight: bold;
+            font-size: 13px; margin-bottom: 4px; color: #cc99ff;
+        }
+        #antyduch_hbtns { display: flex; align-items: center; gap: 5px; }
+        #antyduch_collapse {
+            background: none; border: 1px solid #cc99ff66;
+            color: #cc99ff; border-radius: 4px; cursor: pointer;
+            padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .antyduch_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #antyduch_separator { border-top: 1px solid #cc99ff33; margin: 5px 0; }
+        #antyduch_status { font-size: 11px; }
+        .antyduch_row {
+            display: flex; align-items: center; gap: 5px;
+            margin: 4px 0; font-size: 11px;
+        }
+        .antyduch_row input {
+            width: 42px; background: rgba(200,150,255,.12);
+            border: 1px solid #cc99ff55; border-radius: 4px;
+            color: #e0ccff; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        // ON/OFF
+        const cbOn = document.getElementById('antyduch_on');
+        cbOn.addEventListener('change', () => {
+            CONFIG.enabled = cbOn.checked;
+            if (CONFIG.enabled) zaplanujRuch();
+            saveConfig();
+        });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // min/max
+        const minInput = document.getElementById('antyduch_min');
+        const maxInput = document.getElementById('antyduch_max');
+        const aktualizujCzasy = () => {
+            let mn = Math.max(1, Math.min(60, parseInt(minInput.value) || 5));
+            let mx = Math.max(1, Math.min(60, parseInt(maxInput.value) || 7));
+            if (mn > mx) mx = mn; // pilnuj żeby min <= max
+            minInput.value = mn; maxInput.value = mx;
+            CONFIG.minMinuty = mn; CONFIG.maxMinuty = mx;
+            zaplanujRuch();
+            saveConfig();
+        };
+        minInput.addEventListener('change', aktualizujCzasy);
+        maxInput.addEventListener('change', aktualizujCzasy);
+        minInput.addEventListener('mousedown', e => e.stopPropagation());
+        maxInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        // collapse
+        document.getElementById('antyduch_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('antyduch_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('antyduch_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // drag
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 130));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('antyduch_status');
+        if (!el) return;
+        el.textContent = txt;
+        el.style.color = kolor || '#e0ccff';
+    };
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('antyduch_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
+
+        // Nie ruszaj się w walce
+        if (wWalce()) {
+            updateStatus('⚔️ Walka – wstrzymane', '#ff9966');
+            return;
+        }
+
+        const teraz = Date.now();
+        const pozostalo = Math.max(0, nastepnyRuch - teraz);
+
+        if (pozostalo <= 0) {
+            const ok = zrobRuch();
+            zaplanujRuch();
+            if (ok) updateStatus('✅ Wykonano ruch', '#66ff99');
+            else    updateStatus('⚠️ Brak wolnego pola', '#ffcc66');
+        } else {
+            const min = Math.floor(pozostalo / 60000);
+            const sek = Math.floor((pozostalo % 60000) / 1000);
+            updateStatus(`⏳ Następny ruch za ${min}:${sek.toString().padStart(2,'0')}`, '#aee9ff');
+        }
+    };
+
+    stworzWidget();
+    zaplanujRuch();
+    timerInterval = setInterval(tick, 1000);
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: powalce ======================
+    function initModul_powalce() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        widgetPos: { x: 12, y: null, bottom: 190 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('zpw_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('zpw_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    let wybranyZestaw = null;   // który zestaw założyć po walce (null = nic)
+
+    // ── Pomocnicze ───────────────────────────────────────────────
+
+    const wWalce = () => {
+        return Engine.battle
+            && Engine.battle.isBattleShow
+            && Engine.battle.isBattleShow()
+            && !Engine.battle.endBattle;
+    };
+
+    const zmienZestaw = (nr) => {
+        if (nr < 1 || nr > 9) return;
+        // Zmiana przez _g (sprawdzona droga, nie przeładowuje gry).
+        // Bez cooldownu/potwierdzania - roszada po walce ma być natychmiastowa.
+        if (typeof _g === 'function') {
+            _g('builds&action=updateCurrent&id=' + encodeURIComponent(String(nr)));
+        } else if (Engine.communication && Engine.communication.send2) {
+            Engine.communication.send2(`builds&action=updateCurrent&id=${nr}`, undefined);
+        }
+    };
+
+    const pokazToast = (txt) => {
+        let el = document.getElementById('zpw_toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'zpw_toast';
+            Object.assign(el.style, {
+                position: 'fixed', bottom: '80px', left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(0,0,0,.9)', color: '#99ff99',
+                padding: '7px 18px', borderRadius: '8px', fontSize: '13px',
+                zIndex: '99999', border: '1px solid #99ff9955',
+                pointerEvents: 'none', transition: 'opacity .35s',
+                fontFamily: 'sans-serif',
+            });
+            document.body.appendChild(el);
+        }
+        el.textContent = txt;
+        el.style.opacity = '1';
+        clearTimeout(el._t);
+        el._t = setTimeout(() => el.style.opacity = '0', 2800);
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('zpw_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'zpw_widget';
+
+        // Przyciski 1-9
+        let btns = '';
+        for (let i = 1; i <= 9; i++) {
+            btns += `<button class="zpw_set_btn" data-set="${i}">${i}</button>`;
+        }
+
+        w.innerHTML = `
+        <div id="zpw_header">
+            <span id="zpw_title">🔄 Zestaw Po Walce</span>
+            <div id="zpw_hbtns">
+                <label class="zpw_toggle"><input type="checkbox" id="zpw_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="zpw_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="zpw_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="zpw_status">⚪ Poza walką</div>
+            <div id="zpw_separator"></div>
+            <div id="zpw_label">Zmień na zestaw po walce:</div>
+            <div id="zpw_btns">${btns}</div>
+            <button id="zpw_clear">✖ Anuluj wybór</button>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #zpw_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #99ff9988;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #ccffcc;
+            z-index: 99999;
+            width: 215px;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.6;
+            cursor: move;
+        }
+        #zpw_header {
+            display: flex; justify-content: space-between;
+            align-items: center; font-weight: bold;
+            font-size: 13px; margin-bottom: 4px; color: #99ff99;
+        }
+        #zpw_hbtns { display: flex; align-items: center; gap: 5px; }
+        #zpw_collapse {
+            background: none; border: 1px solid #99ff9966;
+            color: #99ff99; border-radius: 4px; cursor: pointer;
+            padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .zpw_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #zpw_separator { border-top: 1px solid #99ff9933; margin: 5px 0; }
+        #zpw_status { font-size: 11px; }
+        #zpw_label { font-size: 11px; color: #aaa; margin: 4px 0 3px; }
+        #zpw_btns {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 4px;
+            margin-bottom: 5px;
+        }
+        .zpw_set_btn {
+            background: rgba(150,255,150,.1);
+            border: 1px solid #99ff9955;
+            color: #ccffcc;
+            border-radius: 5px;
+            cursor: pointer;
+            padding: 4px 0;
+            font-size: 13px;
+            font-weight: bold;
+            transition: all .15s;
+        }
+        .zpw_set_btn:hover { background: rgba(150,255,150,.25); }
+        .zpw_set_btn.zpw_active {
+            background: #44cc44;
+            color: #fff;
+            border-color: #88ff88;
+            box-shadow: 0 0 6px #44cc4499;
+        }
+        #zpw_clear {
+            width: 100%;
+            background: rgba(255,100,100,.12);
+            border: 1px solid #ff666655;
+            color: #ffaaaa;
+            border-radius: 5px;
+            cursor: pointer;
+            padding: 3px 0;
+            font-size: 11px;
+        }
+        #zpw_clear:hover { background: rgba(255,100,100,.25); }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        // Przyciski zestawów
+        w.querySelectorAll('.zpw_set_btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const nr = parseInt(btn.dataset.set);
+                if (wybranyZestaw === nr) {
+                    // ponowne kliknięcie = odznacz
+                    wybranyZestaw = null;
+                } else {
+                    wybranyZestaw = nr;
+                }
+                odswiezPrzyciski();
+            });
+            btn.addEventListener('mousedown', e => e.stopPropagation());
+        });
+
+        // Anuluj
+        const clearBtn = document.getElementById('zpw_clear');
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            wybranyZestaw = null;
+            odswiezPrzyciski();
+        });
+        clearBtn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // ON/OFF
+        const cbOn = document.getElementById('zpw_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // collapse
+        document.getElementById('zpw_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('zpw_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('zpw_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // drag
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 190));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const odswiezPrzyciski = () => {
+        document.querySelectorAll('.zpw_set_btn').forEach(btn => {
+            const nr = parseInt(btn.dataset.set);
+            btn.classList.toggle('zpw_active', nr === wybranyZestaw);
+        });
+    };
+
+    const updateStatus = () => {
+        const el = document.getElementById('zpw_status');
+        if (!el) return;
+        if (wWalce()) {
+            if (wybranyZestaw) {
+                el.textContent = `⚔️ Walka → po niej zestaw ${wybranyZestaw}`;
+                el.style.color = '#ffe066';
+            } else {
+                el.textContent = '⚔️ W walce (wybierz zestaw)';
+                el.style.color = '#aee9ff';
+            }
+        } else {
+            if (wybranyZestaw) {
+                el.textContent = `⏳ Czeka na walkę (zestaw ${wybranyZestaw})`;
+                el.style.color = '#ccffcc';
+            } else {
+                el.textContent = '⚪ Poza walką';
+                el.style.color = '#888';
+            }
+        }
+    };
+
+    // Czy walka jest rozstrzygnięta (najwcześniejszy moment - endBattle = true)
+    const walkaSkonczona = () => {
+        return Engine.battle && Engine.battle.endBattle === true;
+    };
+
+    // Czy okno walki jest jeszcze otwarte
+    const oknoWalkiOtwarte = () => {
+        return Engine.battle
+            && Engine.battle.isBattleShow
+            && Engine.battle.isBattleShow();
+    };
+
+    let juzZmieniono = false; // żeby nie wysyłać wielokrotnie w tej samej walce
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('zpw_on');
+        const wlaczony = !cbOn || cbOn.checked;
+
+        const wOknie = oknoWalkiOtwarte();
+        const skonczona = walkaSkonczona();
+
+        // Reset flagi gdy nowa walka się zaczyna (okno otwarte, jeszcze nie skończona)
+        if (wOknie && !skonczona) {
+            juzZmieniono = false;
+        }
+
+        // NATYCHMIAST gdy walka rozstrzygnięta - wysyłamy zestaw bez czekania
+        // na zamknięcie okna. To najwcześniejszy możliwy moment.
+        if (skonczona && !juzZmieniono) {
+            if (wlaczony && wybranyZestaw) {
+                const nr = wybranyZestaw;
+                zmienZestaw(nr);
+                pokazToast(`🔄 Walka skończona → Zestaw ${nr}`);
+                wybranyZestaw = null;
+                odswiezPrzyciski();
+            }
+            juzZmieniono = true;
+        }
+
+        // Reset flagi gdy całkowicie poza walką (okno zamknięte)
+        if (!wOknie) {
+            juzZmieniono = false;
+        }
+
+        updateStatus();
+    };
+
+    stworzWidget();
+    setInterval(tick, 50);  // 50ms - tak szybko jak Wodzu, żeby zdążyć przed dobijarką
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: grupa ======================
+    function initModul_grupa() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        maxOsob: 10,           // dodawaj tylko gdy w grupie jest mniej niż tyle
+        dodawajKlan: true,     // relation 1 i 2
+        dodawajPrzyjaciol: true, // relation 2 i 3
+        dodawajSojusz: true,   // sojusz klanowy
+        intervalMs: 2000,
+        cooldownMs: 5000,      // odstęp między zaproszeniami tej samej osoby
+        widgetPos: { x: 12, y: null, bottom: 250 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('adg_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('adg_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    // Pamięć ostatnich zaproszeń (id -> timestamp) żeby nie spamować
+    const ostatnieZaproszenia = {};
+
+    // ── Pomocnicze ───────────────────────────────────────────────
+
+    const getHero = () => Engine.hero.d;
+
+    // Wielkość grupy = liczba elementów .party-member (łącznie z tobą).
+    // Gdy nie ma grupy, elementów jest 0 -> jesteś sam (1 osoba).
+    const wielkoscGrupy = () => {
+        const n = document.querySelectorAll('.party-member').length;
+        return n === 0 ? 1 : n; // sam = 1 osoba
+    };
+
+    // Czy jesteś dowódcą grupy?
+    // Wskaźnik: przycisk "rozwiąż grupę" (.party__disband) jest widoczny
+    // tylko dla lidera. Gdy jesteś sam (brak grupy) - też możesz zapraszać
+    // (zaproszenie utworzy grupę i zostaniesz liderem).
+    const jestesDowodca = () => {
+        // Sam = brak elementów party-member = możesz zapraszać
+        if (document.querySelectorAll('.party-member').length === 0) return true;
+        // W grupie - sprawdź czy widoczny przycisk rozwiązania
+        return Array.from(document.querySelectorAll('.party__disband'))
+            .some(e => e.style.display === 'block');
+    };
+
+    // Czy gracz jest "swój" (klan / przyjaciel / sojusz) wg ustawień
+    // Relacje zweryfikowane empirycznie na żywych danych:
+    //   2 = klanowicz + przyjaciel
+    //   3 = przyjaciel (spoza klanu)
+    //   4 = klanowicz (sam, bez przyjaźni)
+    //   5 = sojusznik klanowy
+    //   6 = obcy / wróg
+    //   1 = obcy (NIE swój!)
+    // Klanowicza najpewniej rozpoznać po wspólnym clan.id (twarde dane).
+    const czySwoj = (o, heroClanId) => {
+        const rel = o.relation;
+        const oClanId = (o.clan && o.clan.id) || 0;
+
+        // Klanowicz po clan.id - najpewniejszy wskaźnik
+        const klanPoId = (heroClanId > 0 && oClanId === heroClanId);
+        const klanPoRel = (rel === 2 || rel === 4);
+        const klan = klanPoId || klanPoRel;
+
+        const przyjaciel = (rel === 2 || rel === 3);
+        const sojusz = (rel === 5);
+
+        if (CONFIG.dodawajKlan && klan) return true;
+        if (CONFIG.dodawajPrzyjaciol && przyjaciel) return true;
+        if (CONFIG.dodawajSojusz && sojusz) return true;
+        return false;
+    };
+
+    // Czy gracz jest już w mojej grupie (po DOM)
+    const jestWGrupie = (id) => {
+        return document.querySelector(`.party-member.other-party-id-${id}`) !== null;
+    };
+
+    const zapros = (id) => {
+        if (typeof _g === 'function') {
+            _g(`party&a=inv&id=${id}`);
+        }
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('adg_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'adg_widget';
+        w.innerHTML = `
+        <div id="adg_header">
+            <span id="adg_title">➕ Auto Grupa</span>
+            <div id="adg_hbtns">
+                <label class="adg_toggle"><input type="checkbox" id="adg_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="adg_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="adg_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="adg_status">⚪ Czekam...</div>
+            <div id="adg_separator"></div>
+            <div class="adg_row">
+                <span>Dodawaj gdy w grupie mniej niż:</span>
+            </div>
+            <div class="adg_row">
+                <input id="adg_max" type="number" min="2" max="10" value="${CONFIG.maxOsob}">
+                <span>osób</span>
+            </div>
+            <label class="adg_checkrow">
+                <input type="checkbox" id="adg_klan" ${CONFIG.dodawajKlan ? 'checked' : ''}>
+                <span>Klanowicze</span>
+            </label>
+            <label class="adg_checkrow">
+                <input type="checkbox" id="adg_friends" ${CONFIG.dodawajPrzyjaciol ? 'checked' : ''}>
+                <span>Przyjaciele</span>
+            </label>
+            <label class="adg_checkrow">
+                <input type="checkbox" id="adg_sojusz" ${CONFIG.dodawajSojusz ? 'checked' : ''}>
+                <span>Sojusznicy klanowi</span>
+            </label>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #adg_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #ffaa6688;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #ffddbb;
+            z-index: 99999;
+            width: 210px;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.6;
+            cursor: move;
+        }
+        #adg_header {
+            display: flex; justify-content: space-between;
+            align-items: center; font-weight: bold;
+            font-size: 13px; margin-bottom: 4px; color: #ffaa66;
+        }
+        #adg_hbtns { display: flex; align-items: center; gap: 5px; }
+        #adg_collapse {
+            background: none; border: 1px solid #ffaa6666;
+            color: #ffaa66; border-radius: 4px; cursor: pointer;
+            padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .adg_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #adg_separator { border-top: 1px solid #ffaa6633; margin: 5px 0; }
+        #adg_status { font-size: 11px; }
+        .adg_row {
+            display: flex; align-items: center; gap: 5px;
+            margin: 4px 0; font-size: 11px;
+        }
+        .adg_row input {
+            width: 45px; background: rgba(255,170,100,.12);
+            border: 1px solid #ffaa6655; border-radius: 4px;
+            color: #ffddbb; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        .adg_checkrow {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 11px; cursor: pointer; margin-top: 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        // ON/OFF
+        const cbOn = document.getElementById('adg_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        // max osób
+        const maxInput = document.getElementById('adg_max');
+        maxInput.addEventListener('change', () => {
+            CONFIG.maxOsob = Math.max(2, Math.min(10, parseInt(maxInput.value) || 10));
+            maxInput.value = CONFIG.maxOsob;
+            saveConfig();
+        });
+        maxInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        // checkboxy
+        const cbKlan = document.getElementById('adg_klan');
+        cbKlan.addEventListener('change', () => { CONFIG.dodawajKlan = cbKlan.checked; saveConfig(); });
+        cbKlan.addEventListener('mousedown', e => e.stopPropagation());
+
+        const cbFriends = document.getElementById('adg_friends');
+        cbFriends.addEventListener('change', () => { CONFIG.dodawajPrzyjaciol = cbFriends.checked; saveConfig(); });
+        cbFriends.addEventListener('mousedown', e => e.stopPropagation());
+
+        const cbSojusz = document.getElementById('adg_sojusz');
+        cbSojusz.addEventListener('change', () => { CONFIG.dodawajSojusz = cbSojusz.checked; saveConfig(); });
+        cbSojusz.addEventListener('mousedown', e => e.stopPropagation());
+
+        // collapse
+        document.getElementById('adg_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('adg_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('adg_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // drag
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 250));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('adg_status');
+        if (!el) return;
+        el.textContent = txt;
+        el.style.color = kolor || '#ffddbb';
+    };
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('adg_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
+
+        const wGrupie = wielkoscGrupy();
+
+        // Grupa pełna?
+        if (wGrupie >= CONFIG.maxOsob) {
+            updateStatus(`✅ Grupa pełna (${wGrupie}/${CONFIG.maxOsob})`, '#66ff99');
+            return;
+        }
+
+        // Nie masz dowództwa? Nie możesz zapraszać - nie spamuj serwera
+        if (!jestesDowodca()) {
+            updateStatus(`🚫 Brak dowództwa (${wGrupie}/${CONFIG.maxOsob})`, '#ff9966');
+            return;
+        }
+
+        // Szukaj kogoś swojego na mapie
+        const hero = getHero();
+        const heroId = String(hero.id);
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+        const others = Engine.others.getDrawableList()
+            .filter(o => o.d && o.d.nick && o.d.id)
+            .map(o => o.d);
+
+        const teraz = Date.now();
+        let zaproszono = null;
+
+        for (const o of others) {
+            const id = String(o.id);
+            if (id === heroId) continue;           // nie zapraszaj siebie
+            if (!czySwoj(o, heroClanId)) continue; // tylko klan/przyjaciele/sojusz
+            if (jestWGrupie(id)) continue;         // już w grupie
+            // cooldown na tę osobę
+            if (ostatnieZaproszenia[id] && (teraz - ostatnieZaproszenia[id]) < CONFIG.cooldownMs) continue;
+
+            zapros(id);
+            ostatnieZaproszenia[id] = teraz;
+            zaproszono = o.nick;
+            break; // jedno zaproszenie na tick
+        }
+
+        if (zaproszono) {
+            updateStatus(`➕ Zaproszono: ${zaproszono} (${wGrupie}/${CONFIG.maxOsob})`, '#ffe066');
+        } else {
+            updateStatus(`🔍 Szukam swoich (${wGrupie}/${CONFIG.maxOsob})`, '#aee9ff');
+        }
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: lista ======================
+    function initModul_lista() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        intervalMs: 1000,
+        pokazSwoich: true,
+        pokazWrogow: true,
+        widgetPos: { x: null, y: 60, right: 12 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('lg_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('lg_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    const PROF_NAZWY = {
+        w: 'Wojownik', p: 'Paladyn', b: 'Tancerz', h: 'Łowca', t: 'Tropiciel', m: 'Mag',
+    };
+    const PROF_KOLORY = {
+        w: '#ff6644', p: '#ffcc44', b: '#cc66ff', h: '#66cc66', t: '#66ccff', m: '#ff66cc',
+    };
+
+    // Kolejka graczy do zaproszenia po walce: id -> {nick, prof}
+    const kolejka = new Map();
+    // Pamięć zaproszeń (cooldown)
+    const ostatnieZaproszenia = {};
+    const COOLDOWN = 4000;
+
+    // ── Pomocnicze ───────────────────────────────────────────────
+
+    const getHero = () => Engine.hero.d;
+
+    const wWalce = () => Engine.battle && Engine.battle.isBattleShow
+        && Engine.battle.isBattleShow() && !Engine.battle.endBattle;
+
+    const walkaSkonczona = () => Engine.battle && Engine.battle.endBattle === true;
+
+    const jestesDowodca = () => {
+        if (document.querySelectorAll('.party-member').length === 0) return true;
+        return Array.from(document.querySelectorAll('.party__disband'))
+            .some(e => e.style.display === 'block');
+    };
+
+    const jestWGrupie = (id) => document.querySelector(`.party-member.other-party-id-${id}`) !== null;
+
+    // Klasyfikacja gracza: 'klan' | 'przyjaciel' | 'sojusz' | 'wrog'
+    const klasyfikuj = (o, heroClanId) => {
+        const rel = o.relation;
+        const oClanId = (o.clan && o.clan.id) || 0;
+        if (heroClanId > 0 && oClanId === heroClanId) return 'klan';
+        if (rel === 4) return 'klan';
+        if (rel === 2) return 'klan';        // klan+przyjaciel - traktujemy jako klan
+        if (rel === 3) return 'przyjaciel';
+        if (rel === 5) return 'sojusz';
+        return 'wrog'; // 1, 6, inne
+    };
+
+    const czySwoj = (kat) => kat === 'klan' || kat === 'przyjaciel' || kat === 'sojusz';
+
+    const zapros = (id) => {
+        if (typeof _g === 'function') _g(`party&a=inv&id=${id}`);
+    };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('lg_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'lg_widget';
+        w.innerHTML = `
+        <div id="lg_header">
+            <span id="lg_title">👥 Gracze na mapie</span>
+            <div id="lg_hbtns">
+                <span id="lg_queue_badge" style="display:none;">0</span>
+                <input type="checkbox" id="lg_on" checked style="display:none;">
+                <button id="lg_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="lg_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="lg_battle_info"></div>
+            <div id="lg_list"></div>
+            <div id="lg_queue_actions" style="display:none;">
+                <button id="lg_queue_clear">✖ Wyczyść kolejkę</button>
+            </div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #lg_widget {
+            position: fixed;
+            background: rgba(8,8,20,.95);
+            border: 1px solid #88aaff88;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #cdd9ff;
+            z-index: 99999;
+            width: 235px;
+            max-height: 70vh;
+            user-select: none;
+            font-family: sans-serif;
+            line-height: 1.5;
+            display: flex;
+            flex-direction: column;
+        }
+        #lg_header {
+            display: flex; justify-content: space-between;
+            align-items: center; font-weight: bold;
+            font-size: 13px; margin-bottom: 4px; color: #88aaff;
+            cursor: move;
+        }
+        #lg_hbtns { display: flex; align-items: center; gap: 6px; }
+        #lg_queue_badge {
+            background: #ffaa44; color: #000; font-weight: bold;
+            border-radius: 10px; padding: 0 7px; font-size: 11px;
+        }
+        #lg_collapse {
+            background: none; border: 1px solid #88aaff66;
+            color: #88aaff; border-radius: 4px; cursor: pointer;
+            padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        #lg_body { overflow-y: auto; flex: 1; }
+        #lg_battle_info {
+            font-size: 11px; text-align: center; margin-bottom: 4px;
+            color: #ffcc66;
+        }
+        .lg_section_title {
+            font-size: 10px; text-transform: uppercase;
+            letter-spacing: .5px; color: #8899bb;
+            margin: 6px 0 2px; border-bottom: 1px solid #ffffff15;
+            padding-bottom: 2px;
+        }
+        .lg_player {
+            display: flex; align-items: center; gap: 5px;
+            padding: 2px 3px; border-radius: 4px; margin: 1px 0;
+        }
+        .lg_player:hover { background: rgba(255,255,255,.06); }
+        .lg_player.lg_queued { background: rgba(255,170,68,.18); }
+        .lg_prof {
+            font-size: 9px; font-weight: bold; width: 16px;
+            text-align: center; border-radius: 3px; padding: 1px 0;
+            background: rgba(255,255,255,.08);
+        }
+        .lg_nick { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lg_lvl { font-size: 10px; color: #888; }
+        .lg_invite {
+            background: rgba(100,200,100,.15);
+            border: 1px solid #66cc6666;
+            color: #88ee88; border-radius: 4px;
+            cursor: pointer; padding: 1px 5px; font-size: 11px;
+            white-space: nowrap;
+        }
+        .lg_invite:hover { background: rgba(100,200,100,.35); }
+        .lg_invite.lg_queue_btn { background: rgba(255,170,68,.15); border-color: #ffaa4466; color: #ffcc88; }
+        .lg_invite.lg_queue_btn.active { background: #ffaa44; color: #000; }
+        .lg_empty { font-size: 11px; color: #666; text-align: center; padding: 6px 0; }
+        #lg_queue_actions { margin-top: 5px; }
+        #lg_queue_clear {
+            width: 100%; background: rgba(255,100,100,.12);
+            border: 1px solid #ff666655; color: #ffaaaa;
+            border-radius: 5px; cursor: pointer; padding: 3px 0; font-size: 11px;
+        }
+        #lg_queue_clear:hover { background: rgba(255,100,100,.25); }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        // Pozycja (domyślnie prawy górny róg)
+        if (CONFIG.widgetPos.x !== null) w.style.left = CONFIG.widgetPos.x + 'px';
+        else w.style.right = (CONFIG.widgetPos.right || 12) + 'px';
+        w.style.top = (CONFIG.widgetPos.y || 60) + 'px';
+
+        // collapse
+        document.getElementById('lg_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('lg_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('lg_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        // wyczyść kolejkę
+        document.getElementById('lg_queue_clear').addEventListener('click', (e) => {
+            e.stopPropagation();
+            kolejka.clear();
+            odswiezListe();
+        });
+
+        // drag (za nagłówek)
+        const header = document.getElementById('lg_header');
+        let drag = false, ox = 0, oy = 0;
+        header.addEventListener('mousedown', e => {
+            if (e.target.tagName === 'BUTTON' || e.target.id === 'lg_queue_badge') return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - w.offsetTop;
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.right = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || null;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || 60;
+            saveConfig();
+        });
+    };
+
+    // Buduje wiersz gracza
+    const wierszGracza = (o, kat, wWalceTeraz) => {
+        const prof = (o.prof || '?').toLowerCase();
+        const profKolor = PROF_KOLORY[prof] || '#888';
+        const id = String(o.id);
+        const wKolejce = kolejka.has(id);
+        const juzWGrupie = jestWGrupie(id);
+
+        const row = document.createElement('div');
+        row.className = 'lg_player' + (wKolejce ? ' lg_queued' : '');
+
+        // ikona profesji
+        const profEl = document.createElement('span');
+        profEl.className = 'lg_prof';
+        profEl.style.color = profKolor;
+        profEl.textContent = (o.prof || '?').toUpperCase();
+        profEl.title = PROF_NAZWY[prof] || '?';
+        row.appendChild(profEl);
+
+        // nick
+        const nickEl = document.createElement('span');
+        nickEl.className = 'lg_nick';
+        nickEl.textContent = o.nick || '???';
+        nickEl.title = (o.clan && o.clan.name) ? o.clan.name : '';
+        row.appendChild(nickEl);
+
+        // lvl
+        const lvlEl = document.createElement('span');
+        lvlEl.className = 'lg_lvl';
+        lvlEl.textContent = o.lvl || '';
+        row.appendChild(lvlEl);
+
+        // przycisk zaproszenia (tylko dla nie-wrogów i nie będących już w grupie)
+        if (czySwoj(kat) && !juzWGrupie) {
+            const btn = document.createElement('button');
+            btn.className = 'lg_invite';
+            if (wWalceTeraz) {
+                // tryb kolejki
+                btn.classList.add('lg_queue_btn');
+                if (wKolejce) btn.classList.add('active');
+                btn.textContent = wKolejce ? '✓ kolejka' : '+ kolejka';
+                btn.title = 'Dodaj do kolejki - zaproszę po walce';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (kolejka.has(id)) kolejka.delete(id);
+                    else kolejka.set(id, { nick: o.nick, prof: o.prof });
+                    odswiezListe();
+                });
+            } else {
+                btn.textContent = '+ zaproś';
+                btn.title = 'Zaproś do grupy';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    zapros(id);
+                    ostatnieZaproszenia[id] = Date.now();
+                    btn.textContent = '✓';
+                    setTimeout(() => odswiezListe(), 800);
+                });
+            }
+            row.appendChild(btn);
+        } else if (juzWGrupie) {
+            const inGrp = document.createElement('span');
+            inGrp.style.cssText = 'font-size:10px;color:#66cc66;';
+            inGrp.textContent = '✓ w grp';
+            row.appendChild(inGrp);
+        }
+
+        return row;
+    };
+
+    // ── Odświeżanie listy ────────────────────────────────────────
+
+    const odswiezListe = () => {
+        const lista = document.getElementById('lg_list');
+        if (!lista) return;
+
+        const hero = getHero();
+        const heroId = String(hero.id);
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+        const wWalceTeraz = wWalce();
+
+        // Info o walce / kolejce
+        const battleInfo = document.getElementById('lg_battle_info');
+        if (wWalceTeraz) {
+            battleInfo.textContent = `⚔️ Walka - dodaj do kolejki (${kolejka.size})`;
+        } else if (kolejka.size > 0) {
+            battleInfo.textContent = `⏳ Kolejka: ${kolejka.size} - zaproszę po walce`;
+        } else {
+            battleInfo.textContent = '';
+        }
+
+        // Badge kolejki
+        const badge = document.getElementById('lg_queue_badge');
+        if (kolejka.size > 0) { badge.style.display = 'inline-block'; badge.textContent = kolejka.size; }
+        else badge.style.display = 'none';
+
+        // Przycisk czyszczenia kolejki
+        document.getElementById('lg_queue_actions').style.display = kolejka.size > 0 ? 'block' : 'none';
+
+        // Pobierz graczy
+        const others = Engine.others.getDrawableList()
+            .filter(o => o.d && o.d.nick && o.d.id && String(o.d.id) !== heroId)
+            .map(o => o.d);
+
+        // Mapa id -> obiekt (do sekcji kolejki)
+        const mapaGraczy = {};
+        others.forEach(o => { mapaGraczy[String(o.id)] = o; });
+
+        const swoi = [];
+        const wrogowie = [];
+        for (const o of others) {
+            const kat = klasyfikuj(o, heroClanId);
+            if (czySwoj(kat)) swoi.push({ o, kat });
+            else wrogowie.push({ o, kat });
+        }
+
+        const sortNick = (a, b) => (a.o.nick||'').localeCompare(b.o.nick||'');
+
+        lista.innerHTML = '';
+
+        // ── Sekcja kolejki (na górze, jeśli coś jest) ──
+        if (kolejka.size > 0) {
+            const t = document.createElement('div');
+            t.className = 'lg_section_title';
+            t.style.color = '#ffaa44';
+            t.textContent = `⏳ Kolejka dodawania (${kolejka.size})`;
+            lista.appendChild(t);
+
+            for (const [id, dane] of kolejka) {
+                const o = mapaGraczy[id]; // może być undefined gdy poza zasięgiem
+                const row = document.createElement('div');
+                row.className = 'lg_player lg_queued';
+
+                const prof = ((o ? o.prof : dane.prof) || '?').toLowerCase();
+                const profEl = document.createElement('span');
+                profEl.className = 'lg_prof';
+                profEl.style.color = PROF_KOLORY[prof] || '#888';
+                profEl.textContent = ((o ? o.prof : dane.prof) || '?').toUpperCase();
+                row.appendChild(profEl);
+
+                const nickEl = document.createElement('span');
+                nickEl.className = 'lg_nick';
+                const nick = (o ? o.nick : dane.nick) || '???';
+                nickEl.textContent = o ? nick : `${nick} (poza zasięgiem)`;
+                if (!o) nickEl.style.color = '#999';
+                row.appendChild(nickEl);
+
+                // przycisk usunięcia z kolejki
+                const delBtn = document.createElement('button');
+                delBtn.className = 'lg_invite';
+                delBtn.style.cssText = 'background:rgba(255,100,100,.15);border-color:#ff666666;color:#ffaaaa;';
+                delBtn.textContent = '✖';
+                delBtn.title = 'Usuń z kolejki';
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    kolejka.delete(id);
+                    odswiezListe();
+                });
+                row.appendChild(delBtn);
+
+                lista.appendChild(row);
+            }
+        }
+
+        // ── Funkcja budująca sekcje per profesja ──
+        const dodajSekcjeProfesji = (gracze, naglowekPrefix, naglowekKolor) => {
+            // Grupuj po profesji
+            const wgProf = {};
+            for (const item of gracze) {
+                const p = (item.o.prof || '?').toLowerCase();
+                if (!wgProf[p]) wgProf[p] = [];
+                wgProf[p].push(item);
+            }
+            // Kolejność profesji
+            const kolejnosc = ['w', 'p', 'b', 'h', 't', 'm'];
+            const profKeys = Object.keys(wgProf).sort((a, b) => {
+                const ia = kolejnosc.indexOf(a); const ib = kolejnosc.indexOf(b);
+                return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+            });
+
+            for (const p of profKeys) {
+                const grupa = wgProf[p].sort(sortNick);
+                const t = document.createElement('div');
+                t.className = 'lg_section_title';
+                t.style.color = naglowekKolor;
+                const profNazwa = PROF_NAZWY[p] || p.toUpperCase();
+                t.innerHTML = `<span style="color:${PROF_KOLORY[p] || '#888'}">●</span> ${naglowekPrefix} ${profNazwa} (${grupa.length})`;
+                lista.appendChild(t);
+                grupa.forEach(({o, kat}) => lista.appendChild(wierszGracza(o, kat, wWalceTeraz)));
+            }
+        };
+
+        // ── Swoi (per profesja) ──
+        if (CONFIG.pokazSwoich) {
+            const naglowek = document.createElement('div');
+            naglowek.className = 'lg_section_title';
+            naglowek.style.cssText = 'color:#66cc66;font-size:11px;margin-top:8px;';
+            naglowek.textContent = `🟢 KLANOWICZE (${swoi.length})`;
+            lista.appendChild(naglowek);
+            if (swoi.length === 0) {
+                const e = document.createElement('div'); e.className = 'lg_empty'; e.textContent = 'brak';
+                lista.appendChild(e);
+            } else {
+                dodajSekcjeProfesji(swoi, '', '#88bb88');
+            }
+        }
+
+        // ── Wrogowie (per profesja) ──
+        if (CONFIG.pokazWrogow) {
+            const naglowek = document.createElement('div');
+            naglowek.className = 'lg_section_title';
+            naglowek.style.cssText = 'color:#ff6666;font-size:11px;margin-top:8px;';
+            naglowek.textContent = `🔴 WROGOWIE (${wrogowie.length})`;
+            lista.appendChild(naglowek);
+            if (wrogowie.length === 0) {
+                const e = document.createElement('div'); e.className = 'lg_empty'; e.textContent = 'brak';
+                lista.appendChild(e);
+            } else {
+                dodajSekcjeProfesji(wrogowie, '', '#bb8888');
+            }
+        }
+    };
+
+    // ── Obsługa kolejki po walce ─────────────────────────────────
+
+    let juzZaproszonoZKolejki = false;
+
+    const obslugaKolejki = () => {
+        // Gdy walka się kończy i mamy kolejkę - zapraszamy wszystkich
+        if (walkaSkonczona() && kolejka.size > 0 && !juzZaproszonoZKolejki) {
+            if (jestesDowodca()) {
+                const teraz = Date.now();
+                let i = 0;
+                for (const id of kolejka.keys()) {
+                    if (jestWGrupie(id)) continue;
+                    if (ostatnieZaproszenia[id] && (teraz - ostatnieZaproszenia[id]) < COOLDOWN) continue;
+                    setTimeout(() => zapros(id), i * 150);
+                    ostatnieZaproszenia[id] = teraz;
+                    i++;
+                }
+                kolejka.clear();
+            }
+            juzZaproszonoZKolejki = true;
+        }
+        // Reset flagi gdy poza walką całkowicie
+        if (!wWalce() && !walkaSkonczona()) {
+            juzZaproszonoZKolejki = false;
+        }
+    };
+
+    // ── Pętla ────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('lg_on');
+        const wlaczony = !cbOn || cbOn.checked;
+        if (!wlaczony) {
+            // wyłączony - wyczyść listę i nie zapraszaj
+            const lista = document.getElementById('lg_list');
+            if (lista) lista.innerHTML = '<div class="lg_empty">Wyłączony</div>';
+            return;
+        }
+        odswiezListe();
+        obslugaKolejki();
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    // Szybszy osobny interval dla kolejki (żeby zdążyć tuż po walce)
+    setInterval(() => {
+        const cbOn = document.getElementById('lg_on');
+        if (cbOn && !cbOn.checked) return;
+        obslugaKolejki();
+    }, 100);
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: przywolanie ======================
+    function initModul_przywolanie() {
+        const addon = () => {
+
+    let ostatniaAkceptacja = 0;
+    const SLOWO_KLUCZ = 'przyzywa';
+
+    // Ukryty przełącznik ON - steruje nim RevoPack (lub domyślnie włączony)
+    const stworzPrzelacznik = () => {
+        if (document.getElementById('aprz_on')) return;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'aprz_on';
+        cb.checked = true;
+        cb.style.display = 'none';
+        document.body.appendChild(cb);
+    };
+
+    const wlaczony = () => {
+        const cb = document.getElementById('aprz_on');
+        return !cb || cb.checked;
+    };
+
+    // Próba akceptacji - wywoływana TYLKO gdy obserwator wykryje zmianę DOM
+    const sprobujZaakceptowac = () => {
+        if (!wlaczony()) return;
+
+        const przycisk = document.querySelector('.alert-accept-hotkey');
+        if (!przycisk || przycisk.offsetParent === null) return;
+
+        // Czy to na pewno przywołanie? (słowo "przyzywa" w treści okna)
+        const tekst = document.body.innerText || '';
+        if (!new RegExp(SLOWO_KLUCZ, 'i').test(tekst)) return;
+
+        // Odstęp żeby nie klikać wielokrotnie tego samego okna
+        const teraz = Date.now();
+        if (teraz - ostatniaAkceptacja < 1500) return;
+        ostatniaAkceptacja = teraz;
+
+        przycisk.click();
+        console.log('[AutoPrzywolanie] Zaakceptowano przywołanie.');
+    };
+
+    // MutationObserver - budzi się TYLKO gdy DOM się zmienia (pojawia się okno)
+    const uruchomObserwator = () => {
+        let zaplanowane = null;
+        const obs = new MutationObserver(() => {
+            if (zaplanowane) return;
+            zaplanowane = setTimeout(() => {
+                zaplanowane = null;
+                sprobujZaakceptowac();
+            }, 120);
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+    };
+
+    stworzPrzelacznik();
+    uruchomObserwator();
+    
+};
+        addon();
+    }
+
+
+    // ====================== MODUŁ: kopalnia ======================
+    function initModul_kopalnia() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: false,
+        nazwaZloza: 'Błękitne złoże',
+        nazwaKilofa: 'Porzucony kilof',
+        maxZasieg: 7,              // max odległość wykrywania złóż/kilofów (kratki)
+        intervalMs: 600,
+        widgetPos: { x: 12, y: null, bottom: 360 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('akop_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('akop_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    // Tryb pracy: 'zloza' = zbieram złoża, 'kilofy' = idę po kilofy
+    let tryb = 'zloza';
+    let ostatniaAkcja = 0;
+    let ostatniCelId = null;
+    let ostatniCelCzas = 0;
+
+    // ── Pomocnicze ───────────────────────────────────────────────
+
+    const getHero = () => Engine.hero.d;
+
+    const wWalce = () => Engine.battle && Engine.battle.isBattleShow
+        && Engine.battle.isBattleShow() && !Engine.battle.endBattle;
+
+    const stoi = () => {
+        const h = getHero();
+        return Engine.hero.rx === h.x && Engine.hero.ry === h.y;
+    };
+
+    const dystans = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+    // Znajdź NPC o danej nazwie
+    const znajdzNpc = (nazwa) => {
+        try {
+            return Engine.npcs.getDrawableList()
+                .filter(o => o.d && o.d.nick === nazwa)
+                .map(o => o.d);
+        } catch(e) { return []; }
+    };
+
+    // Czy okno "brak kilofa" jest na ekranie?
+    const oknoBrakKilofa = () => {
+        const txt = document.body.innerText || '';
+        return /potrzebny jest odpowiedni kilof/i.test(txt);
+    };
+
+    // Zamknij dialog - dowolne kliknięcie w obszar gry zamyka to okno
+    const zamknijDialog = () => {
+        try {
+            const canvas = document.querySelector('#game-canvas, canvas, #map, .map-canvas')
+                || document.body;
+            const r = canvas.getBoundingClientRect();
+            const x = r.left + r.width / 2;
+            const y = r.top + r.height / 2;
+            ['mousedown','mouseup','click'].forEach(typ => {
+                canvas.dispatchEvent(new MouseEvent(typ, {
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: x, clientY: y,
+                }));
+            });
+        } catch(e) {}
+    };
+
+    const idzDo = (x, y) => { try { Engine.hero.autoGoTo({ x, y }); } catch(e) {} };
+    const zbierz = () => { try { Engine.hero.talkNearMob(); } catch(e) {} };
+
+    // ── Widget ───────────────────────────────────────────────────
+
+    const stworzWidget = () => {
+        if (document.getElementById('akop_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'akop_widget';
+        w.innerHTML = `
+        <div id="akop_header">
+            <span id="akop_title">⛏️ Auto Kopalnia</span>
+            <div id="akop_hbtns">
+                <label class="akop_toggle"><input type="checkbox" id="akop_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="akop_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="akop_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="akop_status">⚪ Wyłączony</div>
+            <div id="akop_tryb" style="font-size:11px;"></div>
+            <div id="akop_separator"></div>
+            <div class="akop_row">
+                <span>Złoże:</span>
+                <input id="akop_nazwa" type="text" value="${CONFIG.nazwaZloza}">
+            </div>
+            <div class="akop_row">
+                <span>Kilof:</span>
+                <input id="akop_kilof" type="text" value="${CONFIG.nazwaKilofa}">
+            </div>
+            <div class="akop_row">
+                <span>Zasięg:</span>
+                <input id="akop_zasieg" type="number" min="1" max="20" value="${CONFIG.maxZasieg}" style="flex:0 0 50px;">
+                <span style="min-width:auto;">kratek</span>
+            </div>
+            <div id="akop_count" style="font-size:11px;color:#aaa;"></div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #akop_widget {
+            position: fixed; background: rgba(8,8,20,.95);
+            border: 1px solid #ddaa6688; border-radius: 10px;
+            padding: 8px 10px; font-size: 12px; color: #eeddcc;
+            z-index: 99999; width: 215px; user-select: none;
+            font-family: sans-serif; line-height: 1.6; cursor: move;
+        }
+        #akop_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 13px; margin-bottom: 4px; color: #ddaa66;
+        }
+        #akop_hbtns { display: flex; align-items: center; gap: 5px; }
+        #akop_collapse {
+            background: none; border: 1px solid #ddaa6666; color: #ddaa66;
+            border-radius: 4px; cursor: pointer; padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .akop_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #akop_separator { border-top: 1px solid #ddaa6633; margin: 5px 0; }
+        #akop_status { font-size: 11px; }
+        .akop_row { display: flex; align-items: center; gap: 5px; margin: 4px 0; font-size: 11px; }
+        .akop_row span { min-width: 38px; }
+        .akop_row input {
+            flex: 1; background: rgba(220,170,100,.12); border: 1px solid #ddaa6655;
+            border-radius: 4px; color: #eeddcc; font-size: 11px; padding: 2px 5px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        const cbOn = document.getElementById('akop_on');
+        cbOn.addEventListener('change', () => {
+            CONFIG.enabled = cbOn.checked;
+            if (cbOn.checked) { tryb = 'zloza'; } // reset przy włączeniu
+            saveConfig();
+        });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        const nazwaInput = document.getElementById('akop_nazwa');
+        nazwaInput.addEventListener('change', () => {
+            CONFIG.nazwaZloza = nazwaInput.value.trim() || 'Błękitne złoże';
+            nazwaInput.value = CONFIG.nazwaZloza; saveConfig();
+        });
+        nazwaInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        const kilofInput = document.getElementById('akop_kilof');
+        kilofInput.addEventListener('change', () => {
+            CONFIG.nazwaKilofa = kilofInput.value.trim() || 'Porzucony kilof';
+            kilofInput.value = CONFIG.nazwaKilofa; saveConfig();
+        });
+        kilofInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        const zasiegInput = document.getElementById('akop_zasieg');
+        zasiegInput.addEventListener('change', () => {
+            CONFIG.maxZasieg = Math.max(1, Math.min(20, parseInt(zasiegInput.value) || 7));
+            zasiegInput.value = CONFIG.maxZasieg; saveConfig();
+        });
+        zasiegInput.addEventListener('mousedown', e => e.stopPropagation());
+
+        document.getElementById('akop_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('akop_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('akop_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 360));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('akop_status');
+        if (el) { el.textContent = txt; el.style.color = kolor || '#eeddcc'; }
+    };
+    const updateTryb = (txt, kolor) => {
+        const el = document.getElementById('akop_tryb');
+        if (el) { el.textContent = txt; el.style.color = kolor || '#aaa'; }
+    };
+    const updateCount = (txt) => {
+        const el = document.getElementById('akop_count');
+        if (el) el.textContent = txt;
+    };
+
+    // ── Logika: idź do najbliższego celu i zbierz ────────────────
+
+    const obsluzCel = (lista, etykieta, kolorIdzie, kolorZbiera) => {
+        const hero = getHero();
+        // Tylko cele w zasięgu maxZasieg
+        const wZasiegu = lista.filter(n => dystans(hero, n) <= CONFIG.maxZasieg);
+        if (wZasiegu.length === 0) return false;
+
+        let cel = null, minD = Infinity;
+        for (const n of wZasiegu) {
+            const d = dystans(hero, n);
+            if (d < minD) { minD = d; cel = n; }
+        }
+        if (!cel) return false;
+
+        const teraz = Date.now();
+        const d = dystans(hero, cel);
+
+        // Wykryj utknięcie na jednym celu (np. niedostępny) - po 8s zmień cel
+        if (cel.id === ostatniCelId) {
+            if (teraz - ostatniCelCzas > 8000) {
+                const inne = wZasiegu.filter(n => n.id !== cel.id);
+                if (inne.length) {
+                    let c2=null, m2=Infinity;
+                    for (const n of inne){ const dd=dystans(hero,n); if(dd<m2){m2=dd;c2=n;} }
+                    cel = c2; ostatniCelId = cel.id; ostatniCelCzas = teraz;
+                }
+            }
+        } else {
+            ostatniCelId = cel.id;
+            ostatniCelCzas = teraz;
+        }
+
+        if (d <= 2) {
+            if (teraz - ostatniaAkcja > 1100) {
+                ostatniaAkcja = teraz;
+                zbierz();
+                updateStatus(`⛏️ Zbieram ${etykieta} (${d}kr)`, kolorZbiera);
+            }
+        } else {
+            if (stoi() && teraz - ostatniaAkcja > 700) {
+                ostatniaAkcja = teraz;
+                idzDo(cel.x, cel.y);
+            }
+            updateStatus(`🚶 Idę do ${etykieta} (${d}kr)`, kolorIdzie);
+        }
+        return true;
+    };
+
+    // ── Tick ─────────────────────────────────────────────────────
+
+    const tick = () => {
+        const cbOn = document.getElementById('akop_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); updateTryb(''); updateCount(''); return; }
+
+        if (wWalce()) { updateStatus('⚔️ Walka - czekam', '#ff9966'); return; }
+
+        // Jeśli wyskoczyło okno "brak kilofa" -> zamknij i przełącz na zbieranie kilofów
+        if (oknoBrakKilofa()) {
+            zamknijDialog();
+            tryb = 'kilofy';
+            updateStatus('🚫 Brak kilofa - idę po kilof', '#ffcc44');
+            return;
+        }
+
+        const hero = getHero();
+        const zlozaAll  = znajdzNpc(CONFIG.nazwaZloza);
+        const kilofyAll = znajdzNpc(CONFIG.nazwaKilofa);
+        const zloza  = zlozaAll.filter(n => dystans(hero, n) <= CONFIG.maxZasieg);
+        const kilofy = kilofyAll.filter(n => dystans(hero, n) <= CONFIG.maxZasieg);
+        updateCount(`W zasięgu ${CONFIG.maxZasieg}kr — złóż: ${zloza.length} · kilofów: ${kilofy.length}`);
+
+        if (tryb === 'kilofy') {
+            updateTryb('🔧 Tryb: zbieranie kilofów', '#ffcc44');
+            if (kilofy.length === 0) {
+                updateStatus('⏳ Brak kilofów w zasięgu - czekam', '#aaa');
+                tryb = 'zloza';
+                return;
+            }
+            const ok = obsluzCel(kilofy, 'kilofa', '#aee9ff', '#66ff99');
+            if (!ok) { tryb = 'zloza'; }
+            if (kilofy.length <= 1) tryb = 'zloza';
+            return;
+        }
+
+        // tryb 'zloza'
+        updateTryb('💎 Tryb: zbieranie złóż', '#88ccff');
+        if (zloza.length === 0) {
+            updateStatus(`🔍 Brak złóż w zasięgu ${CONFIG.maxZasieg}kr`, '#aaa');
+            return;
+        }
+        obsluzCel(zloza, 'złoża', '#aee9ff', '#66ff99');
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    
+};
+        addon();
+    }
+    // ============================================================
+    //  INICJALIZACJA
+    // ============================================================
+    function startWszystko() {
+        PACK.loadStan();
+        try { initModul_zestaw(); }      catch (e) { console.error('[Pack] zestaw:', e); }
+        try { initModul_szybka(); }      catch (e) { console.error('[Pack] szybka:', e); }
+        try { initModul_antyduch(); }    catch (e) { console.error('[Pack] antyduch:', e); }
+        try { initModul_powalce(); }     catch (e) { console.error('[Pack] powalce:', e); }
+        try { initModul_grupa(); }       catch (e) { console.error('[Pack] grupa:', e); }
+        try { initModul_lista(); }       catch (e) { console.error('[Pack] lista:', e); }
+        try { initModul_przywolanie(); } catch (e) { console.error('[Pack] przywolanie:', e); }
+        try { initModul_kopalnia(); }    catch (e) { console.error('[Pack] kopalnia:', e); }
+
+        stworzGlowneGui();
+        setTimeout(() => PACK.zastosujStan(), 300);
+        setTimeout(() => PACK.zastosujStan(), 1500);
+        console.log('[RevoPack v1.4] Uruchomiony - 8 dodatków.');
+    }
+
+    function initPack() {
+        try {
+            if (window.Engine && window.Engine.hero && window.Engine.hero.d
+                && window.Engine.hero.d.x !== undefined && window.Engine.map
+                && window.Engine.map.d && window.Engine.others && window.Engine.npcs
+                && window.Engine.communication && window.Engine.communication.send2) {
+                return startWszystko();
+            }
+        } catch (e) {}
+        setTimeout(initPack, 500);
+    }
+
+    window.addEventListener('load', initPack);
+    if (document.readyState === 'complete') setTimeout(initPack, 500);
+
+})();
