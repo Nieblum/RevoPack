@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         RevoPack
-// @version      1.4
+// @version      1.5
 // @author       Nieblum
-// @description  Paczka: Auto Zestaw, Auto Szybka Walka, Anty Duch, Zestaw Po Walce, Auto Dodawanie do Grupy, Lista Graczy, Auto Przywołanie, Auto Kopalnia. Główne GUI do włączania/ukrywania.
+// @description  Paczka: Auto Zestaw, Auto Szybka Walka, Anty Duch, Zestaw Po Walce, Auto Dodawanie do Grupy, Lista Graczy, Auto Przywołanie, Auto Kopalnia, Auto Wylogowanie. Główne GUI do włączania/ukrywania.
 // @match        https://*.margonem.pl/
 // @grant        none
 // ==/UserScript==
@@ -20,6 +20,7 @@
             { id: 'lista',       nazwa: 'Lista Graczy',            widgetEl: 'lg_widget',       onCb: 'lg_on',       ikona: '👥', brakOkna: false },
             { id: 'przywolanie', nazwa: 'Auto Przywołanie',        widgetEl: null,              onCb: 'aprz_on',     ikona: '📨', brakOkna: true  },
             { id: 'kopalnia',    nazwa: 'Auto Kopalnia',           widgetEl: 'akop_widget',     onCb: 'akop_on',     ikona: '⛏️', brakOkna: false },
+            { id: 'wylogowanie', nazwa: 'Auto Wylogowanie',        widgetEl: null,              onCb: 'awyl_on',     ikona: '🚪', brakOkna: true  },
         ],
 
         stan: null,
@@ -165,7 +166,6 @@
         });
         document.addEventListener('mouseup', () => drag = false);
     }
-
 
 
     // ====================== MODUŁ: zestaw ======================
@@ -2698,6 +2698,82 @@
 };
         addon();
     }
+
+
+    // ====================== MODUŁ: wylogowanie ======================
+    function initModul_wylogowanie() {
+        const addon = () => {
+
+    let juzWylogowano = false;
+
+    // Ukryty przełącznik ON - steruje nim RevoPack (domyślnie włączony)
+    const stworzPrzelacznik = () => {
+        if (document.getElementById('awyl_on')) return;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = 'awyl_on';
+        cb.checked = true;
+        cb.style.display = 'none';
+        document.body.appendChild(cb);
+    };
+
+    const wlaczony = () => {
+        const cb = document.getElementById('awyl_on');
+        return !cb || cb.checked;
+    };
+
+    // Czy postać jest martwa? (nakładka .dead-overlay na ekranie)
+    const martwy = () => {
+        const ov = document.querySelector('.dead-overlay');
+        return ov && ov.offsetParent !== null;
+    };
+
+    // Znajdź i kliknij przycisk "Wyloguj"
+    const wyloguj = () => {
+        // Przycisk: div.button zawierający .label z tekstem "Wyloguj"
+        const labelki = Array.from(document.querySelectorAll('.button .label, .label'));
+        for (const l of labelki) {
+            if (/^\s*wyloguj\s*$/i.test(l.textContent)) {
+                const btn = l.closest('.button') || l.parentElement;
+                if (btn) { btn.click(); return true; }
+            }
+        }
+        return false;
+    };
+
+    const sprobuj = () => {
+        if (!wlaczony()) return;
+        if (juzWylogowano) return;
+        if (!martwy()) return;
+
+        // Postać martwa - wyloguj
+        const ok = wyloguj();
+        if (ok) {
+            juzWylogowano = true;
+            console.log('[AutoWylogowanie] Postać nieprzytomna - wylogowano.');
+        }
+    };
+
+    // MutationObserver - budzi się gdy DOM się zmienia (pojawia się nakładka śmierci)
+    const uruchomObserwator = () => {
+        let zaplanowane = null;
+        const obs = new MutationObserver(() => {
+            if (zaplanowane) return;
+            zaplanowane = setTimeout(() => {
+                zaplanowane = null;
+                sprobuj();
+            }, 150);
+        });
+        obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+    };
+
+    stworzPrzelacznik();
+    uruchomObserwator();
+    
+};
+        addon();
+    }
+
     // ============================================================
     //  INICJALIZACJA
     // ============================================================
@@ -2711,11 +2787,12 @@
         try { initModul_lista(); }       catch (e) { console.error('[Pack] lista:', e); }
         try { initModul_przywolanie(); } catch (e) { console.error('[Pack] przywolanie:', e); }
         try { initModul_kopalnia(); }    catch (e) { console.error('[Pack] kopalnia:', e); }
+        try { initModul_wylogowanie(); } catch (e) { console.error('[Pack] wylogowanie:', e); }
 
         stworzGlowneGui();
         setTimeout(() => PACK.zastosujStan(), 300);
         setTimeout(() => PACK.zastosujStan(), 1500);
-        console.log('[RevoPack v1.4] Uruchomiony - 8 dodatków.');
+        console.log('[RevoPack v1.5] Uruchomiony - 9 dodatków.');
     }
 
     function initPack() {
