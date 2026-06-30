@@ -1,8 +1,7 @@
 // ==UserScript==
 // @name         RevoPack
-// @version      1.5
+// @version      1.6
 // @author       Nieblum
-// @description  Paczka: Auto Zestaw, Auto Szybka Walka, Anty Duch, Zestaw Po Walce, Auto Dodawanie do Grupy, Lista Graczy, Auto Przywołanie, Auto Kopalnia, Auto Wylogowanie. Główne GUI do włączania/ukrywania.
 // @match        https://*.margonem.pl/
 // @grant        none
 // ==/UserScript==
@@ -21,6 +20,7 @@
             { id: 'przywolanie', nazwa: 'Auto Przywołanie',        widgetEl: null,              onCb: 'aprz_on',     ikona: '📨', brakOkna: true  },
             { id: 'kopalnia',    nazwa: 'Auto Kopalnia',           widgetEl: 'akop_widget',     onCb: 'akop_on',     ikona: '⛏️', brakOkna: false },
             { id: 'wylogowanie', nazwa: 'Auto Wylogowanie',        widgetEl: null,              onCb: 'awyl_on',     ikona: '🚪', brakOkna: true  },
+            { id: 'jebadlo',     nazwa: 'GoDowskie Jebadło',       widgetEl: 'aatk_widget',     onCb: 'aatk_on',     ikona: '💀', brakOkna: false },
         ],
 
         stan: null,
@@ -167,12 +167,9 @@
         document.addEventListener('mouseup', () => drag = false);
     }
 
-
-    // ====================== MODUŁ: zestaw ======================
     function initModul_zestaw() {
         const addon = () => {
 
-    // Domyślna konfiguracja (zapisywana w localStorage)
     const DOMYSLNE = {
         zestawy: { w:1, p:1, b:2, h:2, t:2, m:3, default:1 },
         maxKratki: 12,
@@ -215,8 +212,6 @@
     let ostatniaZmiana = 0;
     let ostatniKlikMapy = 0;
 
-    // Po kliknięciu w grę (mapa/postać/przejście) wstrzymaj zmianę zestawu,
-    // żeby żądanie zestawu nie "zjadło" kliknięcia przejścia (powodowało przeładowania).
     document.addEventListener('mousedown', (e) => {
         if (e.target && e.target.closest && e.target.closest('#aze_widget')) return;
         ostatniKlikMapy = Date.now();
@@ -224,8 +219,6 @@
 
     const pauzaPoKliku = () => (Date.now() - ostatniKlikMapy) < CONFIG.pauzaPoKlikuMs;
 
-    // Czy jesteś w grupie? (solo = 0 elementów .party-member, grupa = 2+)
-    // Dodatek domyślnie pauzuje w grupie - nie zmienia zestawu pod nikogo.
     const wGrupie = () => document.querySelectorAll('.party-member').length > 0;
 
     const getHero   = () => isNI ? Engine.hero.d : window.hero;
@@ -234,7 +227,7 @@
     const getOthers = () => {
         if (isNI) {
             return Engine.others.getDrawableList()
-                .filter(o => o.d && o.d.nick && o.d.x !== undefined)  // tylko realni gracze
+                .filter(o => o.d && o.d.nick && o.d.x !== undefined)
                 .map(o => o.d);
         }
         return Object.values(window.g.other || {}).filter(o => o && o.nick);
@@ -242,37 +235,23 @@
 
     const dystans = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
-    // Relacje w NI Classic (ostatecznie zweryfikowane na żywych danych):
-    //   2 = klanowicz + przyjaciel
-    //   3 = przyjaciel (spoza klanu)
-    //   4 = klanowicz (sam, bez przyjaźni)
-    //   5 = sojusznik klanowy
-    //   1, 6 = obcy gracz (WRÓG)
-    // Klanowicza najpewniej rozpoznać po wspólnym clan.id (twarde dane).
-    // Wrogiem jest każdy kto NIE jest klanem/przyjacielem/sojusznikiem.
     const czyWrog = (o, heroId, heroClanId) => {
         const rel = o.relation;
         const oClanId = (o.clan && o.clan.id) || 0;
 
-        // Pomiń samego siebie (po id)
         if (heroId && o.id && String(o.id) === String(heroId)) return false;
 
-        // Klanowicz po clan.id (najpewniejszy wskaźnik)
         if (CONFIG.ignorujKlanowiczow && heroClanId > 0 && oClanId === heroClanId) return false;
 
-        // Klanowicz po relacji (2 lub 4)
         if (CONFIG.ignorujKlanowiczow && (rel === 2 || rel === 4)) return false;
 
-        // Przyjaciel po relacji (2 lub 3)
         if (CONFIG.ignorujPrzyjaciol && (rel === 2 || rel === 3)) return false;
 
-        // Sojusznik klanowy (5)
         if (CONFIG.ignorujSojusznikow && rel === 5) return false;
 
         return true;
     };
 
-    // Odczyt aktualnie aktywnego zestawu z interfejsu gry (1-9) lub null
     const aktualnyZestaw = () => {
         try {
             const el = Array.from(document.querySelectorAll('.builds-interface'))
@@ -291,15 +270,12 @@
     const zmienZestaw = (nr) => {
         if (nr < 1 || nr > 9) return;
 
-        // Cooldown ochronny
         const teraz = Date.now();
         if (teraz - ostatniaZmiana < CONFIG.cooldownMs) return;
 
-        // Czy już mamy ten zestaw aktywny? Jeśli tak - nie wysyłaj nic.
         const aktualny = aktualnyZestaw();
         if (aktualny === nr) { ostatniZestaw = nr; oczekiwanyZestaw = null; return; }
 
-        // Zmiana przez _g (sprawdzona droga - NIE send2, które przeładowywało grę)
         if (typeof _g !== 'function') return;
 
         ostatniaZmiana = teraz;
@@ -309,14 +285,12 @@
 
         _g('builds&action=updateCurrent&id=' + encodeURIComponent(String(nr)));
 
-        // Potwierdzenie po 700ms - jeśli się nie udało, pozwól spróbować ponownie
         setTimeout(() => {
-            if (oczekiwanyZestaw !== nr) return; // już inny cel
+            if (oczekiwanyZestaw !== nr) return;
             const po = aktualnyZestaw();
             if (po === nr) {
-                oczekiwanyZestaw = null; // potwierdzone
+                oczekiwanyZestaw = null;
             } else {
-                // nie potwierdzono - zresetuj by następny tick mógł ponowić
                 ostatniZestaw = -1;
                 oczekiwanyZestaw = null;
             }
@@ -346,15 +320,12 @@
         el._t = setTimeout(() => el.style.opacity = '0', 2800);
     };
 
-    // ── Widget ───────────────────────────────────────────────────
-
     const stworzWidget = () => {
         if (document.getElementById('aze_widget')) return;
 
         const w = document.createElement('div');
         w.id = 'aze_widget';
 
-        // Buduj wiersze profesji
         let profRows = '';
         for (const [key, nazwa] of Object.entries(PROF_NAZWY)) {
             profRows += `
@@ -396,7 +367,6 @@
             </div>
         </div>`;
 
-        // Style
         const style = document.createElement('style');
         style.textContent = `
         #aze_widget {
@@ -499,7 +469,6 @@
         document.head.appendChild(style);
         document.body.appendChild(w);
 
-        // Pozycja
         w.style.left   = CONFIG.widgetPos.x + 'px';
         if (CONFIG.widgetPos.y !== null) {
             w.style.top    = CONFIG.widgetPos.y + 'px';
@@ -507,7 +476,6 @@
             w.style.bottom = CONFIG.widgetPos.bottom + 'px';
         }
 
-        // Zdarzenia inputów profesji
         w.querySelectorAll('.aze_prof_input').forEach(input => {
             input.addEventListener('change', () => {
                 const prof = input.dataset.prof;
@@ -516,11 +484,9 @@
                 CONFIG.zestawy[prof] = val;
                 saveConfig();
             });
-            // Blokuj propagację kliknięć (żeby nie triggerowały drag)
             input.addEventListener('mousedown', e => e.stopPropagation());
         });
 
-        // Zasięg
         const rangeInput = document.getElementById('aze_range');
         rangeInput.addEventListener('change', () => {
             CONFIG.maxKratki = Math.max(1, Math.min(30, parseInt(rangeInput.value) || 12));
@@ -529,7 +495,6 @@
         });
         rangeInput.addEventListener('mousedown', e => e.stopPropagation());
 
-        // ON/OFF
         const cbOn = document.getElementById('aze_on');
         cbOn.addEventListener('change', () => {
             CONFIG.enabled = cbOn.checked;
@@ -537,7 +502,6 @@
         });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // Zwijanie
         document.getElementById('aze_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -546,7 +510,6 @@
             saveConfig();
         });
 
-        // Drag
         let drag = false, ox = 0, oy = 0;
         w.addEventListener('mousedown', e => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
@@ -602,16 +565,12 @@
         setEl.textContent = `🎒 Aktywny zestaw: ${zestaw}`;
     };
 
-    // ── Tick ─────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('aze_on');
         if (cbOn && !cbOn.checked) { updateStatus(false, null, '—'); return; }
 
-        // Domyślna pauza w grupie - gdy jesteś w grupie dodatek nic nie zmienia
         if (wGrupie()) { updateStatus(false, null, '👥 grupa'); return; }
 
-        // Pauza tuż po kliknięciu w mapę/przejście - nie wysyłaj zmiany zestawu
         if (pauzaPoKliku()) return;
 
         const pvp = getMapPvp();
@@ -641,7 +600,6 @@
 
         updateStatus(true, najblizszy, docelowy);
 
-        // zmienZestaw samo sprawdza aktualny zestaw, cooldown i potwierdza zmianę
         const aktualny = aktualnyZestaw();
         if (docelowy !== aktualny) {
             zmienZestaw(docelowy);
@@ -661,15 +619,13 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: szybka ======================
     function initModul_szybka() {
         const addon = () => {
 
     const DOMYSLNE = {
         enabled: true,
-        maxWrogow: 5,        // klikaj F tylko gdy wrogów <= tyle
-        liczTylkoGraczy: true, // czy liczyć tylko graczy (pomijać NPC/przywołania)
+        maxWrogow: 5,
+        liczTylkoGraczy: true,
         intervalMs: 500,
         widgetPos: { x: 12, y: null, bottom: 70 },
         zwiniety: false,
@@ -685,10 +641,8 @@
     const saveConfig = () => localStorage.setItem('aszw_config', JSON.stringify(CONFIG));
     const CONFIG = loadConfig();
 
-    let ostatniaWalka = null; // id walki w której już kliknęliśmy F
-    let probowanoWTejWalce = false; // czy już próbowaliśmy F w tej walce
-
-    // ── Logika walki ─────────────────────────────────────────────
+    let ostatniaWalka = null;
+    let probowanoWTejWalce = false;
 
     const wWalce = () => {
         return Engine.battle
@@ -705,9 +659,8 @@
         for (const id in lista) {
             const w = lista[id];
             if (!w) continue;
-            if (w.team === myteam) continue;          // sojusznik
-            if (CONFIG.liczTylkoGraczy && w.npc) continue; // pomiń NPC/przywołania
-            // pomiń martwych
+            if (w.team === myteam) continue;
+            if (CONFIG.liczTylkoGraczy && w.npc) continue;
             if (w.getHpp && w.getHpp() <= 0) continue;
             if (w.hasZeroHpp && w.hasZeroHpp()) continue;
             wrogowie++;
@@ -718,11 +671,8 @@
     const klikajF = () => {
         if (!Engine.battle.canAutoFight || !Engine.battle.canAutoFight()) return;
         if (Engine.battle.isAutoFightActive && Engine.battle.isAutoFightActive()) return;
-        // autoFight przyjmuje event/arg — wywołujemy jak natywny przycisk
         Engine.battle.autoFight(true);
     };
-
-    // ── Widget ───────────────────────────────────────────────────
 
     const stworzWidget = () => {
         if (document.getElementById('aszw_widget')) return;
@@ -806,12 +756,10 @@
         if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
         else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
 
-        // ON/OFF
         const cbOn = document.getElementById('aszw_on');
         cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // max wrogów
         const maxInput = document.getElementById('aszw_max');
         maxInput.addEventListener('change', () => {
             CONFIG.maxWrogow = Math.max(1, Math.min(50, parseInt(maxInput.value) || 5));
@@ -820,12 +768,10 @@
         });
         maxInput.addEventListener('mousedown', e => e.stopPropagation());
 
-        // tylko gracze
         const onlyP = document.getElementById('aszw_onlyplayers');
         onlyP.addEventListener('change', () => { CONFIG.liczTylkoGraczy = onlyP.checked; saveConfig(); });
         onlyP.addEventListener('mousedown', e => e.stopPropagation());
 
-        // collapse
         document.getElementById('aszw_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -834,7 +780,6 @@
             saveConfig();
         });
 
-        // drag
         let drag = false, ox = 0, oy = 0;
         w.addEventListener('mousedown', e => {
             if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
@@ -864,8 +809,6 @@
         el.style.color = kolor || '#aee9ff';
     };
 
-    // ── Tick ─────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('aszw_on');
         if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
@@ -877,9 +820,7 @@
             return;
         }
 
-        // Identyfikator walki - podpis z id wojowników (żeby rozróżnić walki)
         const podpisWalki = Object.keys(Engine.battle.warriorsList || {}).sort().join(',');
-        // Nowa walka? Zresetuj flagę
         if (podpisWalki !== ostatniaWalka) {
             ostatniaWalka = podpisWalki;
             probowanoWTejWalce = false;
@@ -893,20 +834,18 @@
             return;
         }
 
-        // Już próbowaliśmy w tej walce? Oddaj kontrolę graczowi.
         if (probowanoWTejWalce) {
             updateStatus(`✋ Tryb ręczny (możesz zmieniać F)`, '#aee9ff');
             return;
         }
 
-        // Pierwsze podejście w tej walce - wciśnij F jeśli wrogów w limicie
         if (wrogowie <= CONFIG.maxWrogow && wrogowie > 0) {
             updateStatus(`⚡ Klikam F raz (wrogów: ${wrogowie} ≤ ${CONFIG.maxWrogow})`, '#ffe066');
             klikajF();
             probowanoWTejWalce = true;
         } else if (wrogowie > CONFIG.maxWrogow) {
             updateStatus(`🔴 Za dużo wrogów (${wrogowie} > ${CONFIG.maxWrogow})`, '#ff7755');
-            probowanoWTejWalce = true; // też oznacz - nie spamuj
+            probowanoWTejWalce = true;
         } else {
             updateStatus(`🔍 Liczę wrogów...`, '#aee9ff');
         }
@@ -919,15 +858,13 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: antyduch ======================
     function initModul_antyduch() {
         const addon = () => {
 
     const DOMYSLNE = {
         enabled: true,
-        minMinuty: 5,        // minimalny odstęp między ruchami (minuty)
-        maxMinuty: 7,        // maksymalny odstęp między ruchami (minuty)
+        minMinuty: 5,
+        maxMinuty: 7,
         widgetPos: { x: 12, y: null, bottom: 130 },
         zwiniety: false,
     };
@@ -942,10 +879,8 @@
     const saveConfig = () => localStorage.setItem('antyduch_config', JSON.stringify(CONFIG));
     const CONFIG = loadConfig();
 
-    let nastepnyRuch = 0;   // timestamp (ms) następnego ruchu
+    let nastepnyRuch = 0;
     let timerInterval = null;
-
-    // ── Pomocnicze ───────────────────────────────────────────────
 
     const getHero = () => Engine.hero.d;
 
@@ -956,10 +891,8 @@
             && !Engine.battle.endBattle;
     };
 
-    // Sprawdza kolizję na danym polu (czy można tam wejść)
     const wolnePole = (x, y) => {
         try {
-            // Engine.map.col.check zwraca 0 gdy pole jest przejściowe
             if (Engine.map && Engine.map.col && Engine.map.col.check) {
                 return Engine.map.col.check(x, y) === 0;
             }
@@ -967,13 +900,10 @@
         return false;
     };
 
-    // Wykonuje ruch o jedną kratkę w losowym wolnym kierunku
-    // Używa nextStep (ruch jak WASD) zamiast autoGoTo (klik = czerwony marker)
     const zrobRuch = () => {
         const hero = getHero();
         if (!hero) return false;
 
-        // Ruszamy się tylko gdy postać stoi (nie jest w trakcie ruchu)
         if (Engine.hero.rx !== hero.x || Engine.hero.ry !== hero.y) return false;
         if (Engine.lock && Engine.lock.check && Engine.lock.check()) return false;
 
@@ -984,15 +914,12 @@
             { x: hero.x, y: hero.y - 1 },
         ];
 
-        // Filtruj tylko wolne pola
         const wolne = kierunki.filter(p => wolnePole(p.x, p.y));
         if (wolne.length === 0) return false;
 
-        // Losowy wolny kierunek
         const cel = wolne[Math.floor(Math.random() * wolne.length)];
 
         try {
-            // nextStep ustawia krok i dodaje go do stepsToSend -> ruch bez markera
             Engine.hero.nextStep(cel.x, cel.y);
             return true;
         } catch(e) {
@@ -1010,8 +937,6 @@
     const zaplanujRuch = () => {
         nastepnyRuch = Date.now() + losowyOdstep();
     };
-
-    // ── Widget ───────────────────────────────────────────────────
 
     const stworzWidget = () => {
         if (document.getElementById('antyduch_widget')) return;
@@ -1088,7 +1013,6 @@
         if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
         else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
 
-        // ON/OFF
         const cbOn = document.getElementById('antyduch_on');
         cbOn.addEventListener('change', () => {
             CONFIG.enabled = cbOn.checked;
@@ -1097,13 +1021,12 @@
         });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // min/max
         const minInput = document.getElementById('antyduch_min');
         const maxInput = document.getElementById('antyduch_max');
         const aktualizujCzasy = () => {
             let mn = Math.max(1, Math.min(60, parseInt(minInput.value) || 5));
             let mx = Math.max(1, Math.min(60, parseInt(maxInput.value) || 7));
-            if (mn > mx) mx = mn; // pilnuj żeby min <= max
+            if (mn > mx) mx = mn;
             minInput.value = mn; maxInput.value = mx;
             CONFIG.minMinuty = mn; CONFIG.maxMinuty = mx;
             zaplanujRuch();
@@ -1114,7 +1037,6 @@
         minInput.addEventListener('mousedown', e => e.stopPropagation());
         maxInput.addEventListener('mousedown', e => e.stopPropagation());
 
-        // collapse
         document.getElementById('antyduch_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -1123,7 +1045,6 @@
             saveConfig();
         });
 
-        // drag
         let drag = false, ox = 0, oy = 0;
         w.addEventListener('mousedown', e => {
             if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
@@ -1153,13 +1074,10 @@
         el.style.color = kolor || '#e0ccff';
     };
 
-    // ── Tick ─────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('antyduch_on');
         if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
 
-        // Nie ruszaj się w walce
         if (wWalce()) {
             updateStatus('⚔️ Walka – wstrzymane', '#ff9966');
             return;
@@ -1188,8 +1106,6 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: powalce ======================
     function initModul_powalce() {
         const addon = () => {
 
@@ -1209,9 +1125,7 @@
     const saveConfig = () => localStorage.setItem('zpw_config', JSON.stringify(CONFIG));
     const CONFIG = loadConfig();
 
-    let wybranyZestaw = null;   // który zestaw założyć po walce (null = nic)
-
-    // ── Pomocnicze ───────────────────────────────────────────────
+    let wybranyZestaw = null;
 
     const wWalce = () => {
         return Engine.battle
@@ -1222,8 +1136,6 @@
 
     const zmienZestaw = (nr) => {
         if (nr < 1 || nr > 9) return;
-        // Zmiana przez _g (sprawdzona droga, nie przeładowuje gry).
-        // Bez cooldownu/potwierdzania - roszada po walce ma być natychmiastowa.
         if (typeof _g === 'function') {
             _g('builds&action=updateCurrent&id=' + encodeURIComponent(String(nr)));
         } else if (Engine.communication && Engine.communication.send2) {
@@ -1253,15 +1165,12 @@
         el._t = setTimeout(() => el.style.opacity = '0', 2800);
     };
 
-    // ── Widget ───────────────────────────────────────────────────
-
     const stworzWidget = () => {
         if (document.getElementById('zpw_widget')) return;
 
         const w = document.createElement('div');
         w.id = 'zpw_widget';
 
-        // Przyciski 1-9
         let btns = '';
         for (let i = 1; i <= 9; i++) {
             btns += `<button class="zpw_set_btn" data-set="${i}">${i}</button>`;
@@ -1358,13 +1267,11 @@
         if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
         else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
 
-        // Przyciski zestawów
         w.querySelectorAll('.zpw_set_btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const nr = parseInt(btn.dataset.set);
                 if (wybranyZestaw === nr) {
-                    // ponowne kliknięcie = odznacz
                     wybranyZestaw = null;
                 } else {
                     wybranyZestaw = nr;
@@ -1374,7 +1281,6 @@
             btn.addEventListener('mousedown', e => e.stopPropagation());
         });
 
-        // Anuluj
         const clearBtn = document.getElementById('zpw_clear');
         clearBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1383,12 +1289,10 @@
         });
         clearBtn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // ON/OFF
         const cbOn = document.getElementById('zpw_on');
         cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // collapse
         document.getElementById('zpw_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -1397,7 +1301,6 @@
             saveConfig();
         });
 
-        // drag
         let drag = false, ox = 0, oy = 0;
         w.addEventListener('mousedown', e => {
             if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
@@ -1449,21 +1352,17 @@
         }
     };
 
-    // Czy walka jest rozstrzygnięta (najwcześniejszy moment - endBattle = true)
     const walkaSkonczona = () => {
         return Engine.battle && Engine.battle.endBattle === true;
     };
 
-    // Czy okno walki jest jeszcze otwarte
     const oknoWalkiOtwarte = () => {
         return Engine.battle
             && Engine.battle.isBattleShow
             && Engine.battle.isBattleShow();
     };
 
-    let juzZmieniono = false; // żeby nie wysyłać wielokrotnie w tej samej walce
-
-    // ── Tick ─────────────────────────────────────────────────────
+    let juzZmieniono = false;
 
     const tick = () => {
         const cbOn = document.getElementById('zpw_on');
@@ -1472,13 +1371,10 @@
         const wOknie = oknoWalkiOtwarte();
         const skonczona = walkaSkonczona();
 
-        // Reset flagi gdy nowa walka się zaczyna (okno otwarte, jeszcze nie skończona)
         if (wOknie && !skonczona) {
             juzZmieniono = false;
         }
 
-        // NATYCHMIAST gdy walka rozstrzygnięta - wysyłamy zestaw bez czekania
-        // na zamknięcie okna. To najwcześniejszy możliwy moment.
         if (skonczona && !juzZmieniono) {
             if (wlaczony && wybranyZestaw) {
                 const nr = wybranyZestaw;
@@ -1490,7 +1386,6 @@
             juzZmieniono = true;
         }
 
-        // Reset flagi gdy całkowicie poza walką (okno zamknięte)
         if (!wOknie) {
             juzZmieniono = false;
         }
@@ -1499,25 +1394,23 @@
     };
 
     stworzWidget();
-    setInterval(tick, 50);  // 50ms - tak szybko jak Wodzu, żeby zdążyć przed dobijarką
+    setInterval(tick, 50);
     
 };
         addon();
     }
 
-
-    // ====================== MODUŁ: grupa ======================
     function initModul_grupa() {
         const addon = () => {
 
     const DOMYSLNE = {
         enabled: true,
-        maxOsob: 10,           // dodawaj tylko gdy w grupie jest mniej niż tyle
-        dodawajKlan: true,     // relation 1 i 2
-        dodawajPrzyjaciol: true, // relation 2 i 3
-        dodawajSojusz: true,   // sojusz klanowy
+        maxOsob: 10,
+        dodawajKlan: true,
+        dodawajPrzyjaciol: true,
+        dodawajSojusz: true,
         intervalMs: 2000,
-        cooldownMs: 5000,      // odstęp między zaproszeniami tej samej osoby
+        cooldownMs: 5000,
         widgetPos: { x: 12, y: null, bottom: 250 },
         zwiniety: false,
     };
@@ -1532,46 +1425,25 @@
     const saveConfig = () => localStorage.setItem('adg_config', JSON.stringify(CONFIG));
     const CONFIG = loadConfig();
 
-    // Pamięć ostatnich zaproszeń (id -> timestamp) żeby nie spamować
     const ostatnieZaproszenia = {};
-
-    // ── Pomocnicze ───────────────────────────────────────────────
 
     const getHero = () => Engine.hero.d;
 
-    // Wielkość grupy = liczba elementów .party-member (łącznie z tobą).
-    // Gdy nie ma grupy, elementów jest 0 -> jesteś sam (1 osoba).
     const wielkoscGrupy = () => {
         const n = document.querySelectorAll('.party-member').length;
-        return n === 0 ? 1 : n; // sam = 1 osoba
+        return n === 0 ? 1 : n;
     };
 
-    // Czy jesteś dowódcą grupy?
-    // Wskaźnik: przycisk "rozwiąż grupę" (.party__disband) jest widoczny
-    // tylko dla lidera. Gdy jesteś sam (brak grupy) - też możesz zapraszać
-    // (zaproszenie utworzy grupę i zostaniesz liderem).
     const jestesDowodca = () => {
-        // Sam = brak elementów party-member = możesz zapraszać
         if (document.querySelectorAll('.party-member').length === 0) return true;
-        // W grupie - sprawdź czy widoczny przycisk rozwiązania
         return Array.from(document.querySelectorAll('.party__disband'))
             .some(e => e.style.display === 'block');
     };
 
-    // Czy gracz jest "swój" (klan / przyjaciel / sojusz) wg ustawień
-    // Relacje zweryfikowane empirycznie na żywych danych:
-    //   2 = klanowicz + przyjaciel
-    //   3 = przyjaciel (spoza klanu)
-    //   4 = klanowicz (sam, bez przyjaźni)
-    //   5 = sojusznik klanowy
-    //   6 = obcy / wróg
-    //   1 = obcy (NIE swój!)
-    // Klanowicza najpewniej rozpoznać po wspólnym clan.id (twarde dane).
     const czySwoj = (o, heroClanId) => {
         const rel = o.relation;
         const oClanId = (o.clan && o.clan.id) || 0;
 
-        // Klanowicz po clan.id - najpewniejszy wskaźnik
         const klanPoId = (heroClanId > 0 && oClanId === heroClanId);
         const klanPoRel = (rel === 2 || rel === 4);
         const klan = klanPoId || klanPoRel;
@@ -1585,7 +1457,6 @@
         return false;
     };
 
-    // Czy gracz jest już w mojej grupie (po DOM)
     const jestWGrupie = (id) => {
         return document.querySelector(`.party-member.other-party-id-${id}`) !== null;
     };
@@ -1595,8 +1466,6 @@
             _g(`party&a=inv&id=${id}`);
         }
     };
-
-    // ── Widget ───────────────────────────────────────────────────
 
     const stworzWidget = () => {
         if (document.getElementById('adg_widget')) return;
@@ -1687,12 +1556,10 @@
         if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
         else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
 
-        // ON/OFF
         const cbOn = document.getElementById('adg_on');
         cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
 
-        // max osób
         const maxInput = document.getElementById('adg_max');
         maxInput.addEventListener('change', () => {
             CONFIG.maxOsob = Math.max(2, Math.min(10, parseInt(maxInput.value) || 10));
@@ -1701,7 +1568,6 @@
         });
         maxInput.addEventListener('mousedown', e => e.stopPropagation());
 
-        // checkboxy
         const cbKlan = document.getElementById('adg_klan');
         cbKlan.addEventListener('change', () => { CONFIG.dodawajKlan = cbKlan.checked; saveConfig(); });
         cbKlan.addEventListener('mousedown', e => e.stopPropagation());
@@ -1714,7 +1580,6 @@
         cbSojusz.addEventListener('change', () => { CONFIG.dodawajSojusz = cbSojusz.checked; saveConfig(); });
         cbSojusz.addEventListener('mousedown', e => e.stopPropagation());
 
-        // collapse
         document.getElementById('adg_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -1723,7 +1588,6 @@
             saveConfig();
         });
 
-        // drag
         let drag = false, ox = 0, oy = 0;
         w.addEventListener('mousedown', e => {
             if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
@@ -1753,27 +1617,22 @@
         el.style.color = kolor || '#ffddbb';
     };
 
-    // ── Tick ─────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('adg_on');
         if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
 
         const wGrupie = wielkoscGrupy();
 
-        // Grupa pełna?
         if (wGrupie >= CONFIG.maxOsob) {
             updateStatus(`✅ Grupa pełna (${wGrupie}/${CONFIG.maxOsob})`, '#66ff99');
             return;
         }
 
-        // Nie masz dowództwa? Nie możesz zapraszać - nie spamuj serwera
         if (!jestesDowodca()) {
             updateStatus(`🚫 Brak dowództwa (${wGrupie}/${CONFIG.maxOsob})`, '#ff9966');
             return;
         }
 
-        // Szukaj kogoś swojego na mapie
         const hero = getHero();
         const heroId = String(hero.id);
         const heroClanId = (hero.clan && hero.clan.id) || 0;
@@ -1786,16 +1645,15 @@
 
         for (const o of others) {
             const id = String(o.id);
-            if (id === heroId) continue;           // nie zapraszaj siebie
-            if (!czySwoj(o, heroClanId)) continue; // tylko klan/przyjaciele/sojusz
-            if (jestWGrupie(id)) continue;         // już w grupie
-            // cooldown na tę osobę
+            if (id === heroId) continue;
+            if (!czySwoj(o, heroClanId)) continue;
+            if (jestWGrupie(id)) continue;
             if (ostatnieZaproszenia[id] && (teraz - ostatnieZaproszenia[id]) < CONFIG.cooldownMs) continue;
 
             zapros(id);
             ostatnieZaproszenia[id] = teraz;
             zaproszono = o.nick;
-            break; // jedno zaproszenie na tick
+            break;
         }
 
         if (zaproszono) {
@@ -1812,8 +1670,6 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: lista ======================
     function initModul_lista() {
         const addon = () => {
 
@@ -1843,13 +1699,9 @@
         w: '#ff6644', p: '#ffcc44', b: '#cc66ff', h: '#66cc66', t: '#66ccff', m: '#ff66cc',
     };
 
-    // Kolejka graczy do zaproszenia po walce: id -> {nick, prof}
     const kolejka = new Map();
-    // Pamięć zaproszeń (cooldown)
     const ostatnieZaproszenia = {};
     const COOLDOWN = 4000;
-
-    // ── Pomocnicze ───────────────────────────────────────────────
 
     const getHero = () => Engine.hero.d;
 
@@ -1866,16 +1718,15 @@
 
     const jestWGrupie = (id) => document.querySelector(`.party-member.other-party-id-${id}`) !== null;
 
-    // Klasyfikacja gracza: 'klan' | 'przyjaciel' | 'sojusz' | 'wrog'
     const klasyfikuj = (o, heroClanId) => {
         const rel = o.relation;
         const oClanId = (o.clan && o.clan.id) || 0;
         if (heroClanId > 0 && oClanId === heroClanId) return 'klan';
         if (rel === 4) return 'klan';
-        if (rel === 2) return 'klan';        // klan+przyjaciel - traktujemy jako klan
+        if (rel === 2) return 'klan';
         if (rel === 3) return 'przyjaciel';
         if (rel === 5) return 'sojusz';
-        return 'wrog'; // 1, 6, inne
+        return 'wrog';
     };
 
     const czySwoj = (kat) => kat === 'klan' || kat === 'przyjaciel' || kat === 'sojusz';
@@ -1883,8 +1734,6 @@
     const zapros = (id) => {
         if (typeof _g === 'function') _g(`party&a=inv&id=${id}`);
     };
-
-    // ── Widget ───────────────────────────────────────────────────
 
     const stworzWidget = () => {
         if (document.getElementById('lg_widget')) return;
@@ -1989,12 +1838,10 @@
         document.head.appendChild(style);
         document.body.appendChild(w);
 
-        // Pozycja (domyślnie prawy górny róg)
         if (CONFIG.widgetPos.x !== null) w.style.left = CONFIG.widgetPos.x + 'px';
         else w.style.right = (CONFIG.widgetPos.right || 12) + 'px';
         w.style.top = (CONFIG.widgetPos.y || 60) + 'px';
 
-        // collapse
         document.getElementById('lg_collapse').addEventListener('click', (e) => {
             e.stopPropagation();
             CONFIG.zwiniety = !CONFIG.zwiniety;
@@ -2003,14 +1850,12 @@
             saveConfig();
         });
 
-        // wyczyść kolejkę
         document.getElementById('lg_queue_clear').addEventListener('click', (e) => {
             e.stopPropagation();
             kolejka.clear();
             odswiezListe();
         });
 
-        // drag (za nagłówek)
         const header = document.getElementById('lg_header');
         let drag = false, ox = 0, oy = 0;
         header.addEventListener('mousedown', e => {
@@ -2034,7 +1879,6 @@
         });
     };
 
-    // Buduje wiersz gracza
     const wierszGracza = (o, kat, wWalceTeraz) => {
         const prof = (o.prof || '?').toLowerCase();
         const profKolor = PROF_KOLORY[prof] || '#888';
@@ -2045,7 +1889,6 @@
         const row = document.createElement('div');
         row.className = 'lg_player' + (wKolejce ? ' lg_queued' : '');
 
-        // ikona profesji
         const profEl = document.createElement('span');
         profEl.className = 'lg_prof';
         profEl.style.color = profKolor;
@@ -2053,25 +1896,21 @@
         profEl.title = PROF_NAZWY[prof] || '?';
         row.appendChild(profEl);
 
-        // nick
         const nickEl = document.createElement('span');
         nickEl.className = 'lg_nick';
         nickEl.textContent = o.nick || '???';
         nickEl.title = (o.clan && o.clan.name) ? o.clan.name : '';
         row.appendChild(nickEl);
 
-        // lvl
         const lvlEl = document.createElement('span');
         lvlEl.className = 'lg_lvl';
         lvlEl.textContent = o.lvl || '';
         row.appendChild(lvlEl);
 
-        // przycisk zaproszenia (tylko dla nie-wrogów i nie będących już w grupie)
         if (czySwoj(kat) && !juzWGrupie) {
             const btn = document.createElement('button');
             btn.className = 'lg_invite';
             if (wWalceTeraz) {
-                // tryb kolejki
                 btn.classList.add('lg_queue_btn');
                 if (wKolejce) btn.classList.add('active');
                 btn.textContent = wKolejce ? '✓ kolejka' : '+ kolejka';
@@ -2104,8 +1943,6 @@
         return row;
     };
 
-    // ── Odświeżanie listy ────────────────────────────────────────
-
     const odswiezListe = () => {
         const lista = document.getElementById('lg_list');
         if (!lista) return;
@@ -2115,7 +1952,6 @@
         const heroClanId = (hero.clan && hero.clan.id) || 0;
         const wWalceTeraz = wWalce();
 
-        // Info o walce / kolejce
         const battleInfo = document.getElementById('lg_battle_info');
         if (wWalceTeraz) {
             battleInfo.textContent = `⚔️ Walka - dodaj do kolejki (${kolejka.size})`;
@@ -2125,20 +1961,16 @@
             battleInfo.textContent = '';
         }
 
-        // Badge kolejki
         const badge = document.getElementById('lg_queue_badge');
         if (kolejka.size > 0) { badge.style.display = 'inline-block'; badge.textContent = kolejka.size; }
         else badge.style.display = 'none';
 
-        // Przycisk czyszczenia kolejki
         document.getElementById('lg_queue_actions').style.display = kolejka.size > 0 ? 'block' : 'none';
 
-        // Pobierz graczy
         const others = Engine.others.getDrawableList()
             .filter(o => o.d && o.d.nick && o.d.id && String(o.d.id) !== heroId)
             .map(o => o.d);
 
-        // Mapa id -> obiekt (do sekcji kolejki)
         const mapaGraczy = {};
         others.forEach(o => { mapaGraczy[String(o.id)] = o; });
 
@@ -2154,7 +1986,6 @@
 
         lista.innerHTML = '';
 
-        // ── Sekcja kolejki (na górze, jeśli coś jest) ──
         if (kolejka.size > 0) {
             const t = document.createElement('div');
             t.className = 'lg_section_title';
@@ -2163,7 +1994,7 @@
             lista.appendChild(t);
 
             for (const [id, dane] of kolejka) {
-                const o = mapaGraczy[id]; // może być undefined gdy poza zasięgiem
+                const o = mapaGraczy[id];
                 const row = document.createElement('div');
                 row.className = 'lg_player lg_queued';
 
@@ -2181,7 +2012,6 @@
                 if (!o) nickEl.style.color = '#999';
                 row.appendChild(nickEl);
 
-                // przycisk usunięcia z kolejki
                 const delBtn = document.createElement('button');
                 delBtn.className = 'lg_invite';
                 delBtn.style.cssText = 'background:rgba(255,100,100,.15);border-color:#ff666666;color:#ffaaaa;';
@@ -2198,16 +2028,13 @@
             }
         }
 
-        // ── Funkcja budująca sekcje per profesja ──
         const dodajSekcjeProfesji = (gracze, naglowekPrefix, naglowekKolor) => {
-            // Grupuj po profesji
             const wgProf = {};
             for (const item of gracze) {
                 const p = (item.o.prof || '?').toLowerCase();
                 if (!wgProf[p]) wgProf[p] = [];
                 wgProf[p].push(item);
             }
-            // Kolejność profesji
             const kolejnosc = ['w', 'p', 'b', 'h', 't', 'm'];
             const profKeys = Object.keys(wgProf).sort((a, b) => {
                 const ia = kolejnosc.indexOf(a); const ib = kolejnosc.indexOf(b);
@@ -2226,7 +2053,6 @@
             }
         };
 
-        // ── Swoi (per profesja) ──
         if (CONFIG.pokazSwoich) {
             const naglowek = document.createElement('div');
             naglowek.className = 'lg_section_title';
@@ -2241,7 +2067,6 @@
             }
         }
 
-        // ── Wrogowie (per profesja) ──
         if (CONFIG.pokazWrogow) {
             const naglowek = document.createElement('div');
             naglowek.className = 'lg_section_title';
@@ -2257,12 +2082,9 @@
         }
     };
 
-    // ── Obsługa kolejki po walce ─────────────────────────────────
-
     let juzZaproszonoZKolejki = false;
 
     const obslugaKolejki = () => {
-        // Gdy walka się kończy i mamy kolejkę - zapraszamy wszystkich
         if (walkaSkonczona() && kolejka.size > 0 && !juzZaproszonoZKolejki) {
             if (jestesDowodca()) {
                 const teraz = Date.now();
@@ -2278,19 +2100,15 @@
             }
             juzZaproszonoZKolejki = true;
         }
-        // Reset flagi gdy poza walką całkowicie
         if (!wWalce() && !walkaSkonczona()) {
             juzZaproszonoZKolejki = false;
         }
     };
 
-    // ── Pętla ────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('lg_on');
         const wlaczony = !cbOn || cbOn.checked;
         if (!wlaczony) {
-            // wyłączony - wyczyść listę i nie zapraszaj
             const lista = document.getElementById('lg_list');
             if (lista) lista.innerHTML = '<div class="lg_empty">Wyłączony</div>';
             return;
@@ -2301,7 +2119,6 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    // Szybszy osobny interval dla kolejki (żeby zdążyć tuż po walce)
     setInterval(() => {
         const cbOn = document.getElementById('lg_on');
         if (cbOn && !cbOn.checked) return;
@@ -2312,15 +2129,12 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: przywolanie ======================
     function initModul_przywolanie() {
         const addon = () => {
 
     let ostatniaAkceptacja = 0;
     const SLOWO_KLUCZ = 'przyzywa';
 
-    // Ukryty przełącznik ON - steruje nim RevoPack (lub domyślnie włączony)
     const stworzPrzelacznik = () => {
         if (document.getElementById('aprz_on')) return;
         const cb = document.createElement('input');
@@ -2336,18 +2150,15 @@
         return !cb || cb.checked;
     };
 
-    // Próba akceptacji - wywoływana TYLKO gdy obserwator wykryje zmianę DOM
     const sprobujZaakceptowac = () => {
         if (!wlaczony()) return;
 
         const przycisk = document.querySelector('.alert-accept-hotkey');
         if (!przycisk || przycisk.offsetParent === null) return;
 
-        // Czy to na pewno przywołanie? (słowo "przyzywa" w treści okna)
         const tekst = document.body.innerText || '';
         if (!new RegExp(SLOWO_KLUCZ, 'i').test(tekst)) return;
 
-        // Odstęp żeby nie klikać wielokrotnie tego samego okna
         const teraz = Date.now();
         if (teraz - ostatniaAkceptacja < 1500) return;
         ostatniaAkceptacja = teraz;
@@ -2356,7 +2167,6 @@
         console.log('[AutoPrzywolanie] Zaakceptowano przywołanie.');
     };
 
-    // MutationObserver - budzi się TYLKO gdy DOM się zmienia (pojawia się okno)
     const uruchomObserwator = () => {
         let zaplanowane = null;
         const obs = new MutationObserver(() => {
@@ -2376,8 +2186,6 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: kopalnia ======================
     function initModul_kopalnia() {
         const addon = () => {
 
@@ -2385,7 +2193,7 @@
         enabled: false,
         nazwaZloza: 'Błękitne złoże',
         nazwaKilofa: 'Porzucony kilof',
-        maxZasieg: 7,              // max odległość wykrywania złóż/kilofów (kratki)
+        maxZasieg: 7,
         intervalMs: 600,
         widgetPos: { x: 12, y: null, bottom: 360 },
         zwiniety: false,
@@ -2401,13 +2209,10 @@
     const saveConfig = () => localStorage.setItem('akop_config', JSON.stringify(CONFIG));
     const CONFIG = loadConfig();
 
-    // Tryb pracy: 'zloza' = zbieram złoża, 'kilofy' = idę po kilofy
     let tryb = 'zloza';
     let ostatniaAkcja = 0;
     let ostatniCelId = null;
     let ostatniCelCzas = 0;
-
-    // ── Pomocnicze ───────────────────────────────────────────────
 
     const getHero = () => Engine.hero.d;
 
@@ -2421,7 +2226,6 @@
 
     const dystans = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
-    // Znajdź NPC o danej nazwie
     const znajdzNpc = (nazwa) => {
         try {
             return Engine.npcs.getDrawableList()
@@ -2430,13 +2234,11 @@
         } catch(e) { return []; }
     };
 
-    // Czy okno "brak kilofa" jest na ekranie?
     const oknoBrakKilofa = () => {
         const txt = document.body.innerText || '';
         return /potrzebny jest odpowiedni kilof/i.test(txt);
     };
 
-    // Zamknij dialog - dowolne kliknięcie w obszar gry zamyka to okno
     const zamknijDialog = () => {
         try {
             const canvas = document.querySelector('#game-canvas, canvas, #map, .map-canvas')
@@ -2455,8 +2257,6 @@
 
     const idzDo = (x, y) => { try { Engine.hero.autoGoTo({ x, y }); } catch(e) {} };
     const zbierz = () => { try { Engine.hero.talkNearMob(); } catch(e) {} };
-
-    // ── Widget ───────────────────────────────────────────────────
 
     const stworzWidget = () => {
         if (document.getElementById('akop_widget')) return;
@@ -2529,7 +2329,7 @@
         const cbOn = document.getElementById('akop_on');
         cbOn.addEventListener('change', () => {
             CONFIG.enabled = cbOn.checked;
-            if (cbOn.checked) { tryb = 'zloza'; } // reset przy włączeniu
+            if (cbOn.checked) { tryb = 'zloza'; }
             saveConfig();
         });
         cbOn.addEventListener('mousedown', e => e.stopPropagation());
@@ -2598,11 +2398,8 @@
         if (el) el.textContent = txt;
     };
 
-    // ── Logika: idź do najbliższego celu i zbierz ────────────────
-
     const obsluzCel = (lista, etykieta, kolorIdzie, kolorZbiera) => {
         const hero = getHero();
-        // Tylko cele w zasięgu maxZasieg
         const wZasiegu = lista.filter(n => dystans(hero, n) <= CONFIG.maxZasieg);
         if (wZasiegu.length === 0) return false;
 
@@ -2616,7 +2413,6 @@
         const teraz = Date.now();
         const d = dystans(hero, cel);
 
-        // Wykryj utknięcie na jednym celu (np. niedostępny) - po 8s zmień cel
         if (cel.id === ostatniCelId) {
             if (teraz - ostatniCelCzas > 8000) {
                 const inne = wZasiegu.filter(n => n.id !== cel.id);
@@ -2647,15 +2443,12 @@
         return true;
     };
 
-    // ── Tick ─────────────────────────────────────────────────────
-
     const tick = () => {
         const cbOn = document.getElementById('akop_on');
         if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); updateTryb(''); updateCount(''); return; }
 
         if (wWalce()) { updateStatus('⚔️ Walka - czekam', '#ff9966'); return; }
 
-        // Jeśli wyskoczyło okno "brak kilofa" -> zamknij i przełącz na zbieranie kilofów
         if (oknoBrakKilofa()) {
             zamknijDialog();
             tryb = 'kilofy';
@@ -2683,7 +2476,6 @@
             return;
         }
 
-        // tryb 'zloza'
         updateTryb('💎 Tryb: zbieranie złóż', '#88ccff');
         if (zloza.length === 0) {
             updateStatus(`🔍 Brak złóż w zasięgu ${CONFIG.maxZasieg}kr`, '#aaa');
@@ -2699,14 +2491,11 @@
         addon();
     }
 
-
-    // ====================== MODUŁ: wylogowanie ======================
     function initModul_wylogowanie() {
         const addon = () => {
 
     let juzWylogowano = false;
 
-    // Ukryty przełącznik ON - steruje nim RevoPack (domyślnie włączony)
     const stworzPrzelacznik = () => {
         if (document.getElementById('awyl_on')) return;
         const cb = document.createElement('input');
@@ -2722,15 +2511,12 @@
         return !cb || cb.checked;
     };
 
-    // Czy postać jest martwa? (nakładka .dead-overlay na ekranie)
     const martwy = () => {
         const ov = document.querySelector('.dead-overlay');
         return ov && ov.offsetParent !== null;
     };
 
-    // Znajdź i kliknij przycisk "Wyloguj"
     const wyloguj = () => {
-        // Przycisk: div.button zawierający .label z tekstem "Wyloguj"
         const labelki = Array.from(document.querySelectorAll('.button .label, .label'));
         for (const l of labelki) {
             if (/^\s*wyloguj\s*$/i.test(l.textContent)) {
@@ -2746,7 +2532,6 @@
         if (juzWylogowano) return;
         if (!martwy()) return;
 
-        // Postać martwa - wyloguj
         const ok = wyloguj();
         if (ok) {
             juzWylogowano = true;
@@ -2754,7 +2539,6 @@
         }
     };
 
-    // MutationObserver - budzi się gdy DOM się zmienia (pojawia się nakładka śmierci)
     const uruchomObserwator = () => {
         let zaplanowane = null;
         const obs = new MutationObserver(() => {
@@ -2774,9 +2558,230 @@
         addon();
     }
 
-    // ============================================================
-    //  INICJALIZACJA
-    // ============================================================
+    function initModul_jebadlo() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: false,
+        lvlMin: 0,
+        lvlMax: 500,
+        intervalMs: 50,
+        widgetPos: { x: 12, y: null, bottom: 410 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('aatk_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('aatk_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    let ostatniAtak = 0;
+
+    const getHero = () => Engine.hero.d;
+    const getMapPvp = () => { try { return Engine.map.d.pvp; } catch(e) { return null; } };
+
+    const pozaWalka = () => {
+        try {
+            if (Engine.battle && Engine.battle.isBattleShow) {
+                return !Engine.battle.isBattleShow();
+            }
+            return true;
+        } catch(e) { return true; }
+    };
+
+    const czyWrog = (o, heroId, heroClanId) => {
+        if (heroId && o.id && String(o.id) === String(heroId)) return false;
+        const rel = o.relation;
+        const oClanId = (o.clan && o.clan.id) || 0;
+        if (heroClanId > 0 && oClanId === heroClanId) return false;
+        if (rel === 2 || rel === 4) return false;
+        if (rel === 2 || rel === 3) return false;
+        if (rel === 5) return false;
+        return true;
+    };
+
+    const wWalce = (o) => {
+        try {
+            const obj = Engine.others.getById(o.id);
+            if (!obj || !obj.getOnSelfEmoList) return false;
+            const emo = obj.getOnSelfEmoList()[0];
+            return emo ? emo.type === 'battle' : false;
+        } catch(e) { return false; }
+    };
+
+    const znajdzCele = () => {
+        const hero = getHero();
+        const heroId = String(hero.id);
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+        let lista;
+        try {
+            lista = Engine.others.getDrawableList().filter(o => o.d).map(o => o.d);
+        } catch(e) { return []; }
+
+        return lista
+            .filter(o => o.nick && o.id)
+            .filter(o => czyWrog(o, heroId, heroClanId))
+            .filter(o => o.lvl >= CONFIG.lvlMin && o.lvl <= CONFIG.lvlMax)
+            .filter(o => !wWalce(o));
+    };
+
+    const atakuj = (cel) => {
+        const teraz = Date.now() / 1000;
+        if (teraz - ostatniAtak < 0.3) return;
+        if (typeof _g !== 'function') return;
+        _g(`fight&a=attack&id=${cel.id}`);
+        ostatniAtak = teraz;
+    };
+
+    const stworzWidget = () => {
+        if (document.getElementById('aatk_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'aatk_widget';
+        w.innerHTML = `
+        <div id="aatk_header">
+            <span id="aatk_title">💀 GoDowskie Jebadło</span>
+            <div id="aatk_hbtns">
+                <label class="aatk_toggle"><input type="checkbox" id="aatk_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="aatk_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="aatk_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="aatk_status">⚪ Wyłączony</div>
+            <div id="aatk_separator"></div>
+            <div class="aatk_row">
+                <span>Poziom wroga:</span>
+            </div>
+            <div class="aatk_row">
+                <span>od</span>
+                <input id="aatk_lvlmin" type="number" min="0" max="500" value="${CONFIG.lvlMin}">
+                <span>do</span>
+                <input id="aatk_lvlmax" type="number" min="0" max="500" value="${CONFIG.lvlMax}">
+            </div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #aatk_widget {
+            position: fixed; background: rgba(20,8,8,.95);
+            border: 1px solid #ff665588; border-radius: 10px;
+            padding: 8px 10px; font-size: 12px; color: #ffdddd;
+            z-index: 99999; width: 215px; user-select: none;
+            font-family: sans-serif; line-height: 1.6; cursor: move;
+        }
+        #aatk_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 13px; margin-bottom: 4px; color: #ff6655;
+        }
+        #aatk_hbtns { display: flex; align-items: center; gap: 5px; }
+        #aatk_collapse {
+            background: none; border: 1px solid #ff665566; color: #ff6655;
+            border-radius: 4px; cursor: pointer; padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .aatk_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        #aatk_separator { border-top: 1px solid #ff665533; margin: 5px 0; }
+        #aatk_status { font-size: 11px; }
+        .aatk_row { display: flex; align-items: center; gap: 5px; margin: 4px 0; font-size: 11px; }
+        .aatk_row input {
+            width: 50px; background: rgba(255,100,90,.12); border: 1px solid #ff665555;
+            border-radius: 4px; color: #ffdddd; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        const cbOn = document.getElementById('aatk_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        const lvlMin = document.getElementById('aatk_lvlmin');
+        lvlMin.addEventListener('change', () => {
+            CONFIG.lvlMin = Math.max(0, Math.min(500, parseInt(lvlMin.value) || 0));
+            lvlMin.value = CONFIG.lvlMin; saveConfig();
+        });
+        lvlMin.addEventListener('mousedown', e => e.stopPropagation());
+
+        const lvlMax = document.getElementById('aatk_lvlmax');
+        lvlMax.addEventListener('change', () => {
+            CONFIG.lvlMax = Math.max(0, Math.min(500, parseInt(lvlMax.value) || 500));
+            lvlMax.value = CONFIG.lvlMax; saveConfig();
+        });
+        lvlMax.addEventListener('mousedown', e => e.stopPropagation());
+
+        document.getElementById('aatk_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('aatk_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('aatk_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 410));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('aatk_status');
+        if (el) { el.textContent = txt; el.style.color = kolor || '#ffdddd'; }
+    };
+
+    const tick = () => {
+        const cbOn = document.getElementById('aatk_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
+
+        if (getMapPvp() !== 2) { updateStatus('🟢 Włączony – poza czerwoną mapą', '#88cc88'); return; }
+
+        if (!pozaWalka()) { updateStatus('🟢 Włączony – trwa walka', '#88cc88'); return; }
+
+        const cele = znajdzCele();
+        if (cele.length === 0) { updateStatus('🟢 Włączony – brak wrogów', '#88cc88'); return; }
+
+        const hero = getHero();
+        const cel = cele.find(t =>
+            Math.abs(t.x - hero.x) <= 2 &&
+            Math.abs(t.y - hero.y) <= 2);
+
+        if (cel) {
+            atakuj(cel);
+            updateStatus(`🗡️ Atakuję: ${cel.nick} (${cel.lvl})`, '#ff7766');
+        } else {
+            updateStatus(`👀 Włączony – wrogowie w pobliżu: ${cele.length}`, '#aee9ff');
+        }
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    
+};
+        addon();
+    }
     function startWszystko() {
         PACK.loadStan();
         try { initModul_zestaw(); }      catch (e) { console.error('[Pack] zestaw:', e); }
@@ -2788,11 +2793,12 @@
         try { initModul_przywolanie(); } catch (e) { console.error('[Pack] przywolanie:', e); }
         try { initModul_kopalnia(); }    catch (e) { console.error('[Pack] kopalnia:', e); }
         try { initModul_wylogowanie(); } catch (e) { console.error('[Pack] wylogowanie:', e); }
+        try { initModul_jebadlo(); }     catch (e) { console.error('[Pack] jebadlo:', e); }
 
         stworzGlowneGui();
         setTimeout(() => PACK.zastosujStan(), 300);
         setTimeout(() => PACK.zastosujStan(), 1500);
-        console.log('[RevoPack v1.5] Uruchomiony - 9 dodatków.');
+        console.log('[RevoPack v1.6] Uruchomiony - 10 dodatków.');
     }
 
     function initPack() {
