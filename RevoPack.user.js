@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RevoPack
-// @version      1.6
+// @version      1.8
 // @author       Nieblum
 // @match        https://*.margonem.pl/
 // @grant        none
@@ -17,10 +17,11 @@
             { id: 'powalce',     nazwa: 'Zestaw Po Walce',         widgetEl: 'zpw_widget',      onCb: 'zpw_on',      ikona: '🔄', brakOkna: false },
             { id: 'grupa',       nazwa: 'Auto Dodawanie do Grupy', widgetEl: 'adg_widget',      onCb: 'adg_on',      ikona: '➕', brakOkna: false },
             { id: 'lista',       nazwa: 'Lista Graczy',            widgetEl: 'lg_widget',       onCb: 'lg_on',       ikona: '👥', brakOkna: false },
-            { id: 'przywolanie', nazwa: 'Auto Przywołanie',        widgetEl: null,              onCb: 'aprz_on',     ikona: '📨', brakOkna: true  },
+            { id: 'przywolanie', nazwa: 'Auto Przywołanie',        widgetEl: 'aprz_widget',      onCb: 'aprz_on',     ikona: '📨', brakOkna: false },
             { id: 'kopalnia',    nazwa: 'Auto Kopalnia',           widgetEl: 'akop_widget',     onCb: 'akop_on',     ikona: '⛏️', brakOkna: false },
             { id: 'wylogowanie', nazwa: 'Auto Wylogowanie',        widgetEl: null,              onCb: 'awyl_on',     ikona: '🚪', brakOkna: true  },
             { id: 'jebadlo',     nazwa: 'GoDowskie Jebadło',       widgetEl: 'aatk_widget',     onCb: 'aatk_on',     ikona: '💀', brakOkna: false },
+            { id: 'tytan',       nazwa: 'Zestaw na Tytana',        widgetEl: 'aztyt_widget',    onCb: 'aztyt_on',    ikona: '🐲', brakOkna: false },
         ],
 
         stan: null,
@@ -614,7 +615,7 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    
+    console.log('[AutoZestaw v5.9] Uruchomiony.');
 };
         addon();
     }
@@ -853,7 +854,7 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    
+    console.log('[AutoSzybkaWalka v1.1] Uruchomiony.');
 };
         addon();
     }
@@ -1101,7 +1102,7 @@
     stworzWidget();
     zaplanujRuch();
     timerInterval = setInterval(tick, 1000);
-    
+    console.log('[AntyDuch v1.1] Uruchomiony.');
 };
         addon();
     }
@@ -1395,7 +1396,7 @@
 
     stworzWidget();
     setInterval(tick, 50);
-    
+    console.log('[ZestawPoWalce v2.1] Uruchomiony.');
 };
         addon();
     }
@@ -1665,7 +1666,7 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    
+    console.log('[AutoDodawanieGrupy v1.4] Uruchomiony.');
 };
         addon();
     }
@@ -2124,7 +2125,7 @@
         if (cbOn && !cbOn.checked) return;
         obslugaKolejki();
     }, 100);
-    
+    console.log('[ListaGraczy v1.3] Uruchomiony.');
 };
         addon();
     }
@@ -2132,17 +2133,36 @@
     function initModul_przywolanie() {
         const addon = () => {
 
+    const DOMYSLNE = {
+        enabled: true,
+        profilEnabled: false,
+        kierunek: 'dol',
+        kroki: 1,
+        dialog: false,
+        dialogRazy: 2,
+        opoznienieMs: 500,
+        widgetPos: { x: 12, y: null, bottom: 310 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('aprz_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('aprz_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
     let ostatniaAkceptacja = 0;
     const SLOWO_KLUCZ = 'przyzywa';
 
-    const stworzPrzelacznik = () => {
-        if (document.getElementById('aprz_on')) return;
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = 'aprz_on';
-        cb.checked = true;
-        cb.style.display = 'none';
-        document.body.appendChild(cb);
+    const KIERUNKI = {
+        gora:  { dx: 0,  dy: -1, label: '⬆ Góra' },
+        dol:   { dx: 0,  dy: 1,  label: '⬇ Dół' },
+        lewo:  { dx: -1, dy: 0,  label: '⬅ Lewo' },
+        prawo: { dx: 1,  dy: 0,  label: '➡ Prawo' },
     };
 
     const wlaczony = () => {
@@ -2150,12 +2170,71 @@
         return !cb || cb.checked;
     };
 
+    const stoi = () => {
+        const h = Engine.hero.d;
+        return Engine.hero.rx === h.x && Engine.hero.ry === h.y;
+    };
+
+    const krok = (dx, dy) => {
+        try {
+            const h = Engine.hero.d;
+            const nx = h.x + dx, ny = h.y + dy;
+            if (Engine.map.col.check(nx, ny) === 0) {
+                Engine.hero.nextStep(nx, ny);
+                return true;
+            }
+        } catch(e) {}
+        return false;
+    };
+
+    const wykonajRuch = (dir, kroki, onDone) => {
+        const k = KIERUNKI[dir];
+        if (!k || kroki <= 0) { if (onDone) onDone(); return; }
+        let zrobione = 0;
+        const nastepny = () => {
+            if (zrobione >= kroki) { if (onDone) onDone(); return; }
+            krok(k.dx, k.dy);
+            zrobione++;
+            let czas = 0;
+            const czekaj = setInterval(() => {
+                czas += 80;
+                if (stoi() || czas > 2000) {
+                    clearInterval(czekaj);
+                    setTimeout(nastepny, 130);
+                }
+            }, 80);
+        };
+        nastepny();
+    };
+
+    const wykonajDialog = (ileRazy) => {
+        try { Engine.hero.talkNearMob(); } catch(e) {}
+        setTimeout(() => {
+            let i = 0;
+            const klik = () => {
+                if (i >= ileRazy) return;
+                const opcja = document.querySelectorAll('.answer-text')[0];
+                if (opcja) opcja.click();
+                i++;
+                setTimeout(klik, 320);
+            };
+            klik();
+        }, 600);
+    };
+
+    const wykonajProfil = () => {
+        if (!CONFIG.profilEnabled) return;
+        setTimeout(() => {
+            wykonajRuch(CONFIG.kierunek, CONFIG.kroki, () => {
+                if (CONFIG.dialog) wykonajDialog(CONFIG.dialogRazy);
+            });
+        }, CONFIG.opoznienieMs);
+    };
+
     const sprobujZaakceptowac = () => {
         if (!wlaczony()) return;
-
         const przycisk = document.querySelector('.alert-accept-hotkey');
         if (!przycisk || przycisk.offsetParent === null) return;
-
         const tekst = document.body.innerText || '';
         if (!new RegExp(SLOWO_KLUCZ, 'i').test(tekst)) return;
 
@@ -2164,7 +2243,138 @@
         ostatniaAkceptacja = teraz;
 
         przycisk.click();
-        console.log('[AutoPrzywolanie] Zaakceptowano przywołanie.');
+        wykonajProfil();
+    };
+
+    const stworzWidget = () => {
+        if (document.getElementById('aprz_widget')) return;
+
+        const opcjeKier = Object.keys(KIERUNKI).map(k =>
+            `<option value="${k}" ${CONFIG.kierunek === k ? 'selected' : ''}>${KIERUNKI[k].label}</option>`).join('');
+
+        const w = document.createElement('div');
+        w.id = 'aprz_widget';
+        w.innerHTML = `
+        <div id="aprz_header">
+            <span id="aprz_title">📨 Auto Przywołanie</span>
+            <div id="aprz_hbtns">
+                <label class="aprz_toggle"><input type="checkbox" id="aprz_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="aprz_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="aprz_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <label class="aprz_check">
+                <input type="checkbox" id="aprz_profil" ${CONFIG.profilEnabled ? 'checked' : ''}>
+                <span>Wykonaj akcje po przywołaniu</span>
+            </label>
+            <div class="aprz_row">
+                <span>Ruch:</span>
+                <select id="aprz_kier">${opcjeKier}</select>
+                <input id="aprz_kroki" type="number" min="0" max="20" value="${CONFIG.kroki}">
+                <span>kr.</span>
+            </div>
+            <label class="aprz_check">
+                <input type="checkbox" id="aprz_dialog" ${CONFIG.dialog ? 'checked' : ''}>
+                <span>Zagadaj NPC + 1. opcja</span>
+            </label>
+            <div class="aprz_row">
+                <span>Ile razy 1. opcja:</span>
+                <input id="aprz_dialograzy" type="number" min="1" max="9" value="${CONFIG.dialogRazy}">
+            </div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #aprz_widget {
+            position: fixed; background: rgba(8,8,20,.95);
+            border: 1px solid #66ddaa88; border-radius: 10px;
+            padding: 8px 10px; font-size: 12px; color: #cceedd;
+            z-index: 99999; width: 220px; user-select: none;
+            font-family: sans-serif; line-height: 1.6; cursor: move;
+        }
+        #aprz_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 13px; margin-bottom: 4px; color: #66ddaa;
+        }
+        #aprz_hbtns { display: flex; align-items: center; gap: 5px; }
+        #aprz_collapse {
+            background: none; border: 1px solid #66ddaa66; color: #66ddaa;
+            border-radius: 4px; cursor: pointer; padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .aprz_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        .aprz_check { display: flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; margin: 4px 0; }
+        .aprz_row { display: flex; align-items: center; gap: 5px; font-size: 11px; margin: 4px 0; }
+        .aprz_row select {
+            background: #0e2820; border: 1px solid #66ddaa55;
+            border-radius: 4px; color: #cceedd; font-size: 11px; padding: 1px 3px; flex: 1;
+        }
+        .aprz_row select option {
+            background: #0e2820; color: #cceedd;
+        }
+        .aprz_row input {
+            width: 48px; background: rgba(100,220,170,.12); border: 1px solid #66ddaa55;
+            border-radius: 4px; color: #cceedd; text-align: center; font-size: 11px; padding: 1px 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        const cbOn = document.getElementById('aprz_on');
+        cbOn.addEventListener('change', () => {
+            CONFIG.enabled = cbOn.checked;
+            saveConfig();
+        });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        const bind = (id, fn) => {
+            const el = document.getElementById(id);
+            el.addEventListener('change', fn);
+            el.addEventListener('mousedown', e => e.stopPropagation());
+            return el;
+        };
+
+        const cbProfil = bind('aprz_profil', () => { CONFIG.profilEnabled = cbProfil.checked; saveConfig(); });
+        const selKier = bind('aprz_kier', () => { CONFIG.kierunek = selKier.value; saveConfig(); });
+        const inpKroki = bind('aprz_kroki', () => {
+            CONFIG.kroki = Math.max(0, Math.min(20, parseInt(inpKroki.value) || 0)); inpKroki.value = CONFIG.kroki; saveConfig();
+        });
+        const cbDialog = bind('aprz_dialog', () => { CONFIG.dialog = cbDialog.checked; saveConfig(); });
+        const inpRazy = bind('aprz_dialograzy', () => {
+            CONFIG.dialogRazy = Math.max(1, Math.min(9, parseInt(inpRazy.value) || 1)); inpRazy.value = CONFIG.dialogRazy; saveConfig();
+        });
+
+        document.getElementById('aprz_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('aprz_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('aprz_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON','SELECT'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 310));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
     };
 
     const uruchomObserwator = () => {
@@ -2179,9 +2389,9 @@
         obs.observe(document.body, { childList: true, subtree: true });
     };
 
-    stworzPrzelacznik();
+    stworzWidget();
     uruchomObserwator();
-    
+    console.log('[AutoPrzywolanie v4.1] Uruchomiony.');
 };
         addon();
     }
@@ -2486,7 +2696,7 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    
+    console.log('[AutoKopalnia v2.1] Uruchomiony.');
 };
         addon();
     }
@@ -2553,7 +2763,7 @@
 
     stworzPrzelacznik();
     uruchomObserwator();
-    
+    console.log('[AutoWylogowanie v1.0] Uruchomiony (tryb obserwatora).');
 };
         addon();
     }
@@ -2778,7 +2988,203 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    
+    console.log('[GoDowskie Jebadło v1.5] Uruchomiony.');
+};
+        addon();
+    }
+
+    function initModul_tytan() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: false,
+        zestaw: 1,
+        progWt: 90,
+        intervalMs: 100,
+        widgetPos: { x: 12, y: null, bottom: 460 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('aztyt_config');
+            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
+        } catch(e) {}
+        return Object.assign({}, DOMYSLNE);
+    };
+    const saveConfig = () => localStorage.setItem('aztyt_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    let ostatniaZmiana = 0;
+    let oczekiwany = null;
+
+    const wWalce = () => {
+        try { return Engine.battle && Engine.battle.isBattleShow && Engine.battle.isBattleShow(); }
+        catch(e) { return false; }
+    };
+
+    const znajdzTytana = () => {
+        try {
+            return Engine.npcs.getDrawableList()
+                .filter(o => o.d && o.d.nick)
+                .map(o => o.d)
+                .filter(n => (n.wt || 0) >= CONFIG.progWt)
+                .sort((a, b) => (b.wt || 0) - (a.wt || 0))[0] || null;
+        } catch(e) { return null; }
+    };
+
+    const aktualnyZestaw = () => {
+        try {
+            const el = Array.from(document.querySelectorAll('.builds-interface'))
+                .filter(e => !e.closest('#aztyt_widget'))
+                .find(e => e.offsetParent !== null);
+            if (!el) return null;
+            const txt = (el.querySelector('.choose-build.build-index') || el).textContent || '';
+            const no = parseInt(txt.trim(), 10);
+            return Number.isFinite(no) ? no : null;
+        } catch (e) { return null; }
+    };
+
+    const zmienZestaw = (nr) => {
+        if (nr < 1 || nr > 9) return;
+        const teraz = Date.now();
+        if (teraz - ostatniaZmiana < 800) return;
+        const aktualny = aktualnyZestaw();
+        if (aktualny === nr) { oczekiwany = null; return; }
+        if (typeof _g !== 'function') return;
+        ostatniaZmiana = teraz;
+        oczekiwany = nr;
+        _g('builds&action=updateCurrent&id=' + encodeURIComponent(String(nr)));
+        setTimeout(() => {
+            if (oczekiwany !== nr) return;
+            if (aktualnyZestaw() === nr) oczekiwany = null;
+            else oczekiwany = null;
+        }, 700);
+    };
+
+    const stworzWidget = () => {
+        if (document.getElementById('aztyt_widget')) return;
+
+        const w = document.createElement('div');
+        w.id = 'aztyt_widget';
+        w.innerHTML = `
+        <div id="aztyt_header">
+            <span id="aztyt_title">🐲 Zestaw na Tytana</span>
+            <div id="aztyt_hbtns">
+                <label class="aztyt_toggle"><input type="checkbox" id="aztyt_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="aztyt_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="aztyt_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div id="aztyt_status">⚪ Wyłączony</div>
+            <div class="aztyt_sep"></div>
+            <div class="aztyt_row">
+                <span>Zestaw na tytana:</span>
+                <input id="aztyt_zestaw" type="number" min="1" max="9" value="${CONFIG.zestaw}">
+            </div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #aztyt_widget {
+            position: fixed; background: rgba(20,12,8,.95);
+            border: 1px solid #ffaa4488; border-radius: 10px;
+            padding: 8px 10px; font-size: 12px; color: #ffe6cc;
+            z-index: 99999; width: 215px; user-select: none;
+            font-family: sans-serif; line-height: 1.6; cursor: move;
+        }
+        #aztyt_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 13px; margin-bottom: 4px; color: #ffaa44;
+        }
+        #aztyt_hbtns { display: flex; align-items: center; gap: 5px; }
+        #aztyt_collapse {
+            background: none; border: 1px solid #ffaa4466; color: #ffaa44;
+            border-radius: 4px; cursor: pointer; padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .aztyt_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        .aztyt_sep { border-top: 1px solid #ffaa4433; margin: 5px 0; }
+        #aztyt_status { font-size: 11px; }
+        .aztyt_row { display: flex; align-items: center; gap: 5px; font-size: 11px; margin: 4px 0; justify-content: space-between; }
+        .aztyt_row input {
+            width: 50px; background: rgba(255,170,68,.12); border: 1px solid #ffaa4455;
+            border-radius: 4px; color: #ffe6cc; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        const cbOn = document.getElementById('aztyt_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        const inpZ = document.getElementById('aztyt_zestaw');
+        inpZ.addEventListener('change', () => {
+            CONFIG.zestaw = Math.max(1, Math.min(9, parseInt(inpZ.value) || 1));
+            inpZ.value = CONFIG.zestaw; saveConfig();
+        });
+        inpZ.addEventListener('mousedown', e => e.stopPropagation());
+
+        document.getElementById('aztyt_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('aztyt_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('aztyt_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName)) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 460));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    const updateStatus = (txt, kolor) => {
+        const el = document.getElementById('aztyt_status');
+        if (el) { el.textContent = txt; el.style.color = kolor || '#ffe6cc'; }
+    };
+
+    const tick = () => {
+        const cbOn = document.getElementById('aztyt_on');
+        if (cbOn && !cbOn.checked) { updateStatus('⚪ Wyłączony', '#888'); return; }
+
+        const tytan = znajdzTytana();
+        if (!tytan) { updateStatus('🟢 Włączony – brak tytana', '#88cc88'); return; }
+
+        if (wWalce()) { updateStatus(`⚔️ Tytan (${tytan.nick}) – czekam na koniec walki`, '#ffcc66'); return; }
+
+        const aktualny = aktualnyZestaw();
+        if (aktualny !== CONFIG.zestaw) {
+            zmienZestaw(CONFIG.zestaw);
+            updateStatus(`🐲 Tytan! Zakładam zestaw ${CONFIG.zestaw}`, '#ffaa44');
+        } else {
+            updateStatus(`✅ Tytan (${tytan.nick}) – zestaw ${CONFIG.zestaw}`, '#66ff99');
+        }
+    };
+
+    stworzWidget();
+    setInterval(tick, CONFIG.intervalMs);
+    console.log('[AutoZestawTytan v1.2] Uruchomiony.');
 };
         addon();
     }
@@ -2794,11 +3200,12 @@
         try { initModul_kopalnia(); }    catch (e) { console.error('[Pack] kopalnia:', e); }
         try { initModul_wylogowanie(); } catch (e) { console.error('[Pack] wylogowanie:', e); }
         try { initModul_jebadlo(); }     catch (e) { console.error('[Pack] jebadlo:', e); }
+        try { initModul_tytan(); }       catch (e) { console.error('[Pack] tytan:', e); }
 
         stworzGlowneGui();
         setTimeout(() => PACK.zastosujStan(), 300);
         setTimeout(() => PACK.zastosujStan(), 1500);
-        console.log('[RevoPack v1.6] Uruchomiony - 10 dodatków.');
+        console.log('[RevoPack v1.8] Uruchomiony - 11 dodatków.');
     }
 
     function initPack() {
