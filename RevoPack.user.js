@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         RevoPack
-// @version      1.8
+// @version      2.0
 // @author       Nieblum
 // @match        https://*.margonem.pl/
 // @grant        none
@@ -22,6 +22,7 @@
             { id: 'wylogowanie', nazwa: 'Auto Wylogowanie',        widgetEl: null,              onCb: 'awyl_on',     ikona: '🚪', brakOkna: true  },
             { id: 'jebadlo',     nazwa: 'GoDowskie Jebadło',       widgetEl: 'aatk_widget',     onCb: 'aatk_on',     ikona: '💀', brakOkna: false },
             { id: 'tytan',       nazwa: 'Zestaw na Tytana',        widgetEl: 'aztyt_widget',    onCb: 'aztyt_on',    ikona: '🐲', brakOkna: false },
+            { id: 'budowniczy',  nazwa: 'Budowniczy Grupy',        widgetEl: 'bgr_widget',      onCb: 'bgr_on',      ikona: '🧩', brakOkna: false },
         ],
 
         stan: null,
@@ -3005,14 +3006,37 @@
         zwiniety: false,
     };
 
+    const idPostaci = () => {
+        try { return String(window.getCookie('mchar_id') || 'x'); } catch(e) { return 'x'; }
+    };
+    const kluczZestawu = () => 'aztyt_zestaw_' + idPostaci();
+
+    const loadZestawPostaci = () => {
+        try {
+            const v = parseInt(localStorage.getItem(kluczZestawu()), 10);
+            if (Number.isFinite(v) && v >= 1 && v <= 9) return v;
+        } catch(e) {}
+        return null;
+    };
+    const saveZestawPostaci = (nr) => {
+        try { localStorage.setItem(kluczZestawu(), String(nr)); } catch(e) {}
+    };
+
     const loadConfig = () => {
+        let c;
         try {
             const saved = localStorage.getItem('aztyt_config');
-            if (saved) return Object.assign({}, DOMYSLNE, JSON.parse(saved));
-        } catch(e) {}
-        return Object.assign({}, DOMYSLNE);
+            c = saved ? Object.assign({}, DOMYSLNE, JSON.parse(saved)) : Object.assign({}, DOMYSLNE);
+        } catch(e) { c = Object.assign({}, DOMYSLNE); }
+        const perPost = loadZestawPostaci();
+        if (perPost !== null) c.zestaw = perPost;
+        return c;
     };
-    const saveConfig = () => localStorage.setItem('aztyt_config', JSON.stringify(CONFIG));
+    const saveConfig = () => {
+        const doZapisu = Object.assign({}, CONFIG);
+        delete doZapisu.zestaw;
+        localStorage.setItem('aztyt_config', JSON.stringify(doZapisu));
+    };
     const CONFIG = loadConfig();
 
     let ostatniaZmiana = 0;
@@ -3125,7 +3149,8 @@
         const inpZ = document.getElementById('aztyt_zestaw');
         inpZ.addEventListener('change', () => {
             CONFIG.zestaw = Math.max(1, Math.min(9, parseInt(inpZ.value) || 1));
-            inpZ.value = CONFIG.zestaw; saveConfig();
+            inpZ.value = CONFIG.zestaw;
+            saveZestawPostaci(CONFIG.zestaw);
         });
         inpZ.addEventListener('mousedown', e => e.stopPropagation());
 
@@ -3184,7 +3209,384 @@
 
     stworzWidget();
     setInterval(tick, CONFIG.intervalMs);
-    console.log('[AutoZestawTytan v1.2] Uruchomiony.');
+    console.log('[AutoZestawTytan v1.3] Uruchomiony.');
+};
+        addon();
+    }
+
+    function initModul_budowniczy() {
+        const addon = () => {
+
+    const DOMYSLNE = {
+        enabled: true,
+        sklad: { w:0, p:0, b:0, h:0, t:0, m:0, dyst:0 },
+        widgetPos: { x: 12, y: null, bottom: 510 },
+        zwiniety: false,
+    };
+
+    const loadConfig = () => {
+        try {
+            const saved = localStorage.getItem('bgr_config');
+            if (saved) {
+                const c = Object.assign({}, DOMYSLNE, JSON.parse(saved));
+                c.sklad = Object.assign({}, DOMYSLNE.sklad, c.sklad || {});
+                return c;
+            }
+        } catch(e) {}
+        return JSON.parse(JSON.stringify(DOMYSLNE));
+    };
+    const saveConfig = () => localStorage.setItem('bgr_config', JSON.stringify(CONFIG));
+    const CONFIG = loadConfig();
+
+    const PROF = [
+        { k:'w', nazwa:'Wojownik',  kolor:'#ff6644' },
+        { k:'p', nazwa:'Paladyn',   kolor:'#ffcc44' },
+        { k:'b', nazwa:'Tancerz',   kolor:'#cc66ff' },
+        { k:'h', nazwa:'Łowca',     kolor:'#66cc66' },
+        { k:'t', nazwa:'Tropiciel', kolor:'#66ccff' },
+        { k:'m', nazwa:'Mag',       kolor:'#ff66cc' },
+    ];
+
+    const DYSTANS_PROF = ['h', 't', 'm'];
+
+    let zaproszeni = new Map();
+    const loadZaproszeni = () => {
+        try {
+            const s = localStorage.getItem('bgr_zaproszeni');
+            if (s) zaproszeni = new Map(Object.entries(JSON.parse(s)));
+        } catch(e) {}
+    };
+    const saveZaproszeni = () => {
+        try { localStorage.setItem('bgr_zaproszeni', JSON.stringify(Object.fromEntries(zaproszeni))); } catch(e) {}
+    };
+    loadZaproszeni();
+
+    const getHero = () => Engine.hero.d;
+
+    const jestesDowodca = () => {
+        if (document.querySelectorAll('.party-member').length === 0) return true;
+        return Array.from(document.querySelectorAll('.party__disband'))
+            .some(e => e.style.display === 'block');
+    };
+
+    const idCzlonkowGrupy = () => {
+        return Array.from(document.querySelectorAll('.party-member'))
+            .map(el => {
+                const m = String(el.className).match(/other-party-id-(\d+)/);
+                return m ? m[1] : null;
+            })
+            .filter(Boolean);
+    };
+
+    const profGracza = (id, heroId, heroProf) => {
+        if (String(id) === String(heroId)) return heroProf;
+        try {
+            const o = Engine.others.getById(parseInt(id, 10));
+            if (o && o.d && o.d.prof) return o.d.prof.toLowerCase();
+        } catch(e) {}
+        if (zaproszeni.has(String(id))) return zaproszeni.get(String(id));
+        return null;
+    };
+
+    const czySwoj = (o, heroClanId) => {
+        const rel = o.relation;
+        const oClanId = (o.clan && o.clan.id) || 0;
+        if (heroClanId > 0 && oClanId === heroClanId) return true;
+        return (rel === 2 || rel === 3 || rel === 4 || rel === 5);
+    };
+
+    const zapros = (id) => { if (typeof _g === 'function') _g(`party&a=inv&id=${id}`); };
+
+    const zbierzSwoich = (heroId, heroClanId) => {
+        try {
+            return Engine.others.getDrawableList()
+                .filter(o => o.d && o.d.nick && o.d.id).map(o => o.d)
+                .filter(o => String(o.id) !== heroId)
+                .filter(o => czySwoj(o, heroClanId));
+        } catch(e) { return []; }
+    };
+
+    const budujZeSkladu = (sklad) => {
+        const hero = getHero();
+        const heroId = String(hero.id);
+        const heroProf = (hero.prof || '').toLowerCase();
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+
+        const wGrupieIds = idCzlonkowGrupy();
+        const wGrupieSet = new Set(wGrupieIds.map(String));
+        wGrupieSet.add(heroId);
+
+        const maszProf = {};
+        for (const p of PROF) maszProf[p.k] = 0;
+        for (const id of wGrupieSet) {
+            const pk = profGracza(id, heroId, heroProf);
+            if (pk && maszProf[pk] !== undefined) maszProf[pk]++;
+        }
+
+        const swoi = zbierzSwoich(heroId, heroClanId);
+        const wgProf = {};
+        for (const p of PROF) wgProf[p.k] = [];
+        for (const o of swoi) {
+            const pk = (o.prof || '').toLowerCase();
+            if (wgProf[pk] && !wGrupieSet.has(String(o.id))) wgProf[pk].push(o);
+        }
+
+        const doZaproszenia = [];
+        const zaproszeniTeraz = new Set();
+        const raport = [];
+
+        for (const p of PROF) {
+            const chce = sklad[p.k] || 0;
+            if (chce <= 0) continue;
+            const masz = maszProf[p.k];
+            const brakuje = Math.max(0, chce - masz);
+            const dobierz = wgProf[p.k].slice(0, brakuje);
+            for (const o of dobierz) {
+                doZaproszenia.push(o);
+                zaproszeniTeraz.add(String(o.id));
+                zaproszeni.set(String(o.id), p.k);
+            }
+            raport.push(`${p.nazwa}: ${masz}/${chce}` + (dobierz.length ? ` +${dobierz.length}` : ''));
+        }
+
+        const chceDyst = sklad.dyst || 0;
+        if (chceDyst > 0) {
+            let maszDyst = 0;
+            for (const k of DYSTANS_PROF) maszDyst += maszProf[k];
+            const brakujeDyst = Math.max(0, chceDyst - maszDyst);
+            const kandydaciDyst = [];
+            for (const k of DYSTANS_PROF) {
+                for (const o of wgProf[k]) {
+                    if (!zaproszeniTeraz.has(String(o.id))) kandydaciDyst.push(o);
+                }
+            }
+            const dobierzDyst = kandydaciDyst.slice(0, brakujeDyst);
+            for (const o of dobierzDyst) {
+                doZaproszenia.push(o);
+                zaproszeniTeraz.add(String(o.id));
+                zaproszeni.set(String(o.id), (o.prof || '').toLowerCase());
+            }
+            raport.push(`Dystans: ${maszDyst}/${chceDyst}` + (dobierzDyst.length ? ` +${dobierzDyst.length}` : ''));
+        }
+
+        saveZaproszeni();
+        for (const o of doZaproszenia) zapros(String(o.id));
+        return { ile: doZaproszenia.length, raport };
+    };
+
+    const budujAll = () => {
+        const hero = getHero();
+        const heroId = String(hero.id);
+        const heroClanId = (hero.clan && hero.clan.id) || 0;
+
+        const wGrupieSet = new Set(idCzlonkowGrupy().map(String));
+        wGrupieSet.add(heroId);
+
+        const ileWGrupie = wGrupieSet.size;
+        const wolneMiejsca = Math.max(0, 10 - ileWGrupie);
+
+        const swoi = zbierzSwoich(heroId, heroClanId)
+            .filter(o => !wGrupieSet.has(String(o.id)));
+
+        const dobierz = swoi.slice(0, wolneMiejsca);
+        for (const o of dobierz) {
+            zaproszeni.set(String(o.id), (o.prof || '').toLowerCase());
+            zapros(String(o.id));
+        }
+        saveZaproszeni();
+        return { ile: dobierz.length, raport: [`All: w grupie ${ileWGrupie}, zapraszam ${dobierz.length}`] };
+    };
+
+    const budujGrupe = () => budujZeSkladu(CONFIG.sklad);
+
+    const stworzWidget = () => {
+        if (document.getElementById('bgr_widget')) return;
+
+        const wiersze = PROF.map(p => `
+            <div class="bgr_prof">
+                <span class="bgr_dot" style="background:${p.kolor}"></span>
+                <span class="bgr_pname">${p.nazwa}</span>
+                <input class="bgr_inp" data-prof="${p.k}" type="number" min="0" max="10" value="${CONFIG.sklad[p.k] || 0}">
+            </div>`).join('') + `
+            <div class="bgr_prof bgr_dyst">
+                <span class="bgr_dot" style="background:linear-gradient(90deg,#66cc66,#66ccff,#ff66cc)"></span>
+                <span class="bgr_pname">Dystans <span class="bgr_sub">(łow/trop/mag)</span></span>
+                <input class="bgr_inp" data-prof="dyst" type="number" min="0" max="10" value="${CONFIG.sklad.dyst || 0}">
+            </div>`;
+
+        const w = document.createElement('div');
+        w.id = 'bgr_widget';
+        w.innerHTML = `
+        <div id="bgr_header">
+            <span id="bgr_title">🧩 Budowniczy Grupy</span>
+            <div id="bgr_hbtns">
+                <label class="bgr_toggle"><input type="checkbox" id="bgr_on" ${CONFIG.enabled ? 'checked' : ''}> ON</label>
+                <button id="bgr_collapse">${CONFIG.zwiniety ? '▲' : '▼'}</button>
+            </div>
+        </div>
+        <div id="bgr_body" style="display:${CONFIG.zwiniety ? 'none' : 'block'}">
+            <div class="bgr_hint">Wpisz ilu kogo chcesz, potem kliknij Buduj.</div>
+            ${wiersze}
+            <button id="bgr_buduj">⚔️ Buduj grupę</button>
+            <div class="bgr_presety">
+                <button class="bgr_preset" id="bgr_normal">Normal</button>
+                <button class="bgr_preset" id="bgr_wyj">Pod wyjebanie</button>
+                <button class="bgr_preset" id="bgr_all">All</button>
+            </div>
+            <div id="bgr_reset">wyczyść pamięć zaproszeń</div>
+            <div id="bgr_status"></div>
+        </div>`;
+
+        const style = document.createElement('style');
+        style.textContent = `
+        #bgr_widget {
+            position: fixed; background: rgba(10,14,24,.96);
+            border: 1px solid #66aaff88; border-radius: 10px;
+            padding: 8px 10px; font-size: 12px; color: #d6e4ff;
+            z-index: 99999; width: 215px; user-select: none;
+            font-family: sans-serif; line-height: 1.5; cursor: move;
+        }
+        #bgr_header {
+            display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; font-size: 13px; margin-bottom: 4px; color: #66aaff;
+        }
+        #bgr_hbtns { display: flex; align-items: center; gap: 5px; }
+        #bgr_collapse {
+            background: none; border: 1px solid #66aaff66; color: #66aaff;
+            border-radius: 4px; cursor: pointer; padding: 0 5px; font-size: 10px; line-height: 16px;
+        }
+        .bgr_toggle { font-weight: normal; font-size: 11px; cursor: pointer; }
+        .bgr_hint { font-size: 10px; color: #8899bb; margin-bottom: 5px; }
+        .bgr_prof { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .bgr_dyst { margin-top: 6px; padding-top: 6px; border-top: 1px solid #66aaff33; }
+        .bgr_sub { font-size: 9px; color: #7788aa; }
+        .bgr_dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+        .bgr_pname { flex: 1; font-size: 12px; }
+        .bgr_inp {
+            width: 42px; background: rgba(100,170,255,.12); border: 1px solid #66aaff55;
+            border-radius: 4px; color: #d6e4ff; text-align: center; font-size: 12px; padding: 1px 3px;
+        }
+        #bgr_buduj {
+            width: 100%; margin-top: 7px; padding: 5px 0;
+            background: rgba(100,170,255,.2); border: 1px solid #66aaff88;
+            border-radius: 6px; color: #d6e4ff; font-size: 12px; font-weight: bold; cursor: pointer;
+        }
+        #bgr_buduj:hover { background: rgba(100,170,255,.4); }
+        .bgr_presety { display: flex; gap: 4px; margin-top: 5px; }
+        .bgr_preset {
+            flex: 1; padding: 4px 0; font-size: 10px; cursor: pointer;
+            background: rgba(100,170,255,.1); border: 1px solid #66aaff55;
+            border-radius: 5px; color: #aaccff;
+        }
+        .bgr_preset:hover { background: rgba(100,170,255,.28); color: #fff; }
+        #bgr_reset {
+            text-align: center; font-size: 10px; color: #7788aa;
+            margin-top: 5px; cursor: pointer; text-decoration: underline;
+        }
+        #bgr_reset:hover { color: #aabbdd; }
+        #bgr_status { font-size: 11px; margin-top: 5px; color: #aee9ff; line-height: 1.4; }
+        `;
+        document.head.appendChild(style);
+        document.body.appendChild(w);
+
+        w.style.left = CONFIG.widgetPos.x + 'px';
+        if (CONFIG.widgetPos.y !== null) w.style.top = CONFIG.widgetPos.y + 'px';
+        else w.style.bottom = CONFIG.widgetPos.bottom + 'px';
+
+        const cbOn = document.getElementById('bgr_on');
+        cbOn.addEventListener('change', () => { CONFIG.enabled = cbOn.checked; saveConfig(); });
+        cbOn.addEventListener('mousedown', e => e.stopPropagation());
+
+        w.querySelectorAll('.bgr_inp').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const k = inp.dataset.prof;
+                CONFIG.sklad[k] = Math.max(0, Math.min(10, parseInt(inp.value) || 0));
+                inp.value = CONFIG.sklad[k];
+                saveConfig();
+            });
+            inp.addEventListener('mousedown', e => e.stopPropagation());
+        });
+
+        const status = (txt, kolor) => {
+            const el = document.getElementById('bgr_status');
+            if (el) { el.textContent = txt; el.style.color = kolor || '#aee9ff'; }
+        };
+
+        document.getElementById('bgr_buduj').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const on = document.getElementById('bgr_on');
+            if (on && !on.checked) { status('⚪ Dodatek wyłączony', '#888'); return; }
+            if (!jestesDowodca()) { status('🚫 Nie jesteś dowódcą grupy', '#ff9966'); return; }
+            const suma = Object.values(CONFIG.sklad).reduce((a,b)=>a+b,0);
+            if (suma === 0) { status('⚠️ Wpisz ilu kogo chcesz', '#ffcc66'); return; }
+            const wynik = budujGrupe();
+            const podsumowanie = wynik.raport.length ? ' · ' + wynik.raport.join(', ') : '';
+            if (wynik.ile === 0) status('✅ Skład OK lub brak swoich na mapie' + podsumowanie, '#66ff99');
+            else status(`📨 Wysłano ${wynik.ile} zaproszeń${podsumowanie}`, '#66ff99');
+        });
+
+        const odpalPreset = (fn) => {
+            const on = document.getElementById('bgr_on');
+            if (on && !on.checked) { status('⚪ Dodatek wyłączony', '#888'); return; }
+            if (!jestesDowodca()) { status('🚫 Nie jesteś dowódcą grupy', '#ff9966'); return; }
+            const wynik = fn();
+            const podsumowanie = wynik.raport.length ? ' · ' + wynik.raport.join(', ') : '';
+            if (wynik.ile === 0) status('✅ Skład OK lub brak swoich na mapie' + podsumowanie, '#66ff99');
+            else status(`📨 Wysłano ${wynik.ile} zaproszeń${podsumowanie}`, '#66ff99');
+        };
+
+        document.getElementById('bgr_normal').addEventListener('click', (e) => {
+            e.stopPropagation();
+            odpalPreset(() => budujZeSkladu({ w:2, p:2, b:0, h:2, t:2, m:2, dyst:0 }));
+        });
+        document.getElementById('bgr_wyj').addEventListener('click', (e) => {
+            e.stopPropagation();
+            odpalPreset(() => budujZeSkladu({ w:1, p:0, b:0, h:0, t:0, m:0, dyst:9 }));
+        });
+        document.getElementById('bgr_all').addEventListener('click', (e) => {
+            e.stopPropagation();
+            odpalPreset(budujAll);
+        });
+
+        document.getElementById('bgr_reset').addEventListener('click', (e) => {
+            e.stopPropagation();
+            zaproszeni.clear();
+            saveZaproszeni();
+            status('🗑️ Wyczyszczono pamięć zaproszeń', '#aabbdd');
+        });
+
+        document.getElementById('bgr_collapse').addEventListener('click', (e) => {
+            e.stopPropagation();
+            CONFIG.zwiniety = !CONFIG.zwiniety;
+            document.getElementById('bgr_body').style.display = CONFIG.zwiniety ? 'none' : 'block';
+            document.getElementById('bgr_collapse').textContent = CONFIG.zwiniety ? '▲' : '▼';
+            saveConfig();
+        });
+
+        let drag = false, ox = 0, oy = 0;
+        w.addEventListener('mousedown', e => {
+            if (['INPUT','BUTTON'].includes(e.target.tagName) || e.target.id === 'bgr_reset' || e.target.classList.contains('bgr_preset')) return;
+            drag = true;
+            ox = e.clientX - w.offsetLeft;
+            oy = e.clientY - (w.style.top ? parseInt(w.style.top) : window.innerHeight - w.offsetHeight - parseInt(w.style.bottom || 510));
+        });
+        document.addEventListener('mousemove', e => {
+            if (!drag) return;
+            w.style.left = (e.clientX - ox) + 'px';
+            w.style.top  = (e.clientY - oy) + 'px';
+            w.style.bottom = 'auto';
+        });
+        document.addEventListener('mouseup', () => {
+            if (!drag) return;
+            drag = false;
+            CONFIG.widgetPos.x = parseInt(w.style.left) || 12;
+            CONFIG.widgetPos.y = parseInt(w.style.top)  || null;
+            saveConfig();
+        });
+    };
+
+    stworzWidget();
+    console.log('[BudowniczyGrupy v1.3] Uruchomiony.');
 };
         addon();
     }
@@ -3201,11 +3603,12 @@
         try { initModul_wylogowanie(); } catch (e) { console.error('[Pack] wylogowanie:', e); }
         try { initModul_jebadlo(); }     catch (e) { console.error('[Pack] jebadlo:', e); }
         try { initModul_tytan(); }       catch (e) { console.error('[Pack] tytan:', e); }
+        try { initModul_budowniczy(); }  catch (e) { console.error('[Pack] budowniczy:', e); }
 
         stworzGlowneGui();
         setTimeout(() => PACK.zastosujStan(), 300);
         setTimeout(() => PACK.zastosujStan(), 1500);
-        console.log('[RevoPack v1.8] Uruchomiony - 11 dodatków.');
+        console.log('[RevoPack v2.0] Uruchomiony - 12 dodatków.');
     }
 
     function initPack() {
